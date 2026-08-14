@@ -8,6 +8,7 @@ const environmentSchema = z.object({
   BETTER_AUTH_URL: z.string().url(),
   STMWEB_ADMIN_USERNAME: z.string().trim().min(3).max(64),
   STMWEB_ADMIN_PASSWORD: z.string().min(12).max(256),
+  STMWEB_BUILD_IMAGE: z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).default("ghcr.io/jobssteve164dev/stmweb-build-arm-gcc:v1"),
 });
 
 const parsed = environmentSchema.safeParse(process.env);

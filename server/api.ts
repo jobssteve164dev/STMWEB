@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import express from "express";
 import multer from "multer";
@@ -5,6 +6,7 @@ import { z } from "zod";
 import { pool, withTransaction } from "./database.js";
 import { env } from "./env.js";
 import { requireInternalSession } from "./internal-auth.js";
+import { digestRunnerSecret } from "./runner-auth.js";
 
 interface AuthenticatedRequest extends Request {
   currentUser: { id: string; username: string; name: string };
@@ -15,6 +17,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 32 * 1024 * 1024, files: 1 },
 });
+const sourceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024, files: 1 } });
 
 const uuid = z.string().uuid();
 const sessionSchema = z.object({
@@ -49,6 +52,10 @@ function asyncRoute(
   return (request: Request, response: Response, next: NextFunction) => {
     void handler(request, response, next).catch(next);
   };
+}
+
+function shellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function verifyOrigin(request: Request, response: Response, next: NextFunction) {
@@ -296,13 +303,126 @@ router.put("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (r
   response.json({ success: true });
 }));
 
+router.get("/workspaces/:workspaceId/runners", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query(
+    `SELECT id,name,capabilities,
+       CASE WHEN last_seen_at < now()-interval '45 seconds' THEN 'offline' ELSE status END AS status,
+       current_job_id AS "currentJobId",last_seen_at AS "lastSeenAt",created_at AS "createdAt"
+     FROM build_runners WHERE workspace_id=$1 AND revoked=false ORDER BY created_at DESC`,
+    [workspaceId],
+  );
+  response.json({ runners: result.rows });
+}));
+
+router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  await requireWorkspace(user.id, workspaceId, true);
+  const code = randomBytes(12).toString("base64url").toUpperCase().replace(/[-_]/g, "").slice(0, 12);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  await pool.query(
+    `INSERT INTO runner_pairing_codes (workspace_id,code_hash,expires_at,created_by) VALUES ($1,$2,$3,$4)`,
+    [workspaceId,digestRunnerSecret(code),expiresAt,user.id],
+  );
+  const origin = new URL(env.BETTER_AUTH_URL).origin;
+  response.status(201).json({
+    code,
+    expiresAt: expiresAt.toISOString(),
+    command: `curl -fsSL ${shellArgument(`${origin}/install-runner.sh`)} | sudo bash -s -- --url ${shellArgument(origin)} --code ${shellArgument(code)} --image ${shellArgument(env.STMWEB_BUILD_IMAGE)}`,
+  });
+}));
+
+router.get("/workspaces/:workspaceId/builds", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query(
+    `SELECT j.id,j.runner_id AS "runnerId",r.name AS "runnerName",j.name,j.profile,j.target,j.source_name AS "sourceName",
+       j.source_sha256 AS "sourceSha256",j.status,j.progress,j.error,j.created_at AS "createdAt",j.started_at AS "startedAt",j.finished_at AS "finishedAt",
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
+     FROM build_jobs j JOIN build_runners r ON r.id=j.runner_id WHERE j.workspace_id=$1 ORDER BY j.created_at DESC LIMIT 100`,
+    [workspaceId],
+  );
+  response.json({ builds: result.rows });
+}));
+
+router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  await requireWorkspace(user.id, workspaceId, true);
+  if (!request.file) { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
+  const input = z.object({
+    runnerId: uuid,
+    name: z.string().trim().min(1).max(160),
+    profile: z.literal("stm32-cmake-gcc-v1"),
+    target: z.enum(["stm32f103c8", "stm32f103cb"]),
+  }).parse(request.body);
+  const runner = await pool.query(
+    `SELECT id FROM build_runners WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'`,
+    [input.runnerId,workspaceId],
+  );
+  if (!runner.rowCount) { response.status(409).json({ error: "请选择在线的编译算力" }); return; }
+  const sha256 = createHash("sha256").update(request.file.buffer).digest("hex");
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO build_jobs (workspace_id,runner_id,created_by,name,profile,target,source_name,source_sha256,source_content)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [workspaceId,input.runnerId,user.id,input.name,input.profile,input.target,request.file.originalname,sha256,request.file.buffer],
+  );
+  response.status(201).json({ id: result.rows[0].id, sha256 });
+}));
+
+router.post("/workspaces/:workspaceId/builds/:jobId/cancel", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const jobId = uuid.parse(request.params.jobId);
+  await requireWorkspace(user.id, workspaceId, true);
+  const result = await pool.query(
+    `UPDATE build_jobs SET desired_state='cancelled',status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
+       finished_at=CASE WHEN status='queued' THEN now() ELSE finished_at END,updated_at=now()
+     WHERE id=$1 AND workspace_id=$2 AND status IN ('queued','leased','running') RETURNING id`,
+    [jobId,workspaceId],
+  );
+  if (!result.rowCount) { response.status(409).json({ error: "构建已经结束或不存在" }); return; }
+  response.json({ success: true });
+}));
+
+router.get("/workspaces/:workspaceId/builds/:jobId/events", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const jobId = uuid.parse(request.params.jobId);
+  await requireWorkspace(user.id, workspaceId);
+  const access = await pool.query(`SELECT id FROM build_jobs WHERE id=$1 AND workspace_id=$2`,[jobId,workspaceId]);
+  if (!access.rowCount) { response.status(404).json({ error: "构建不存在" }); return; }
+  const events = await pool.query(`SELECT event_id AS "eventId",type,message,payload,created_at AS "createdAt" FROM build_events WHERE job_id=$1 ORDER BY created_at`,[jobId]);
+  response.json({ events: events.rows });
+}));
+
+router.get("/workspaces/:workspaceId/builds/:jobId/artifacts/:artifactId", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const jobId = uuid.parse(request.params.jobId);
+  const artifactId = uuid.parse(request.params.artifactId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query<{ name: string; content: Buffer; sha256: string }>(
+    `SELECT a.name,a.content,a.sha256 FROM build_artifacts a JOIN build_jobs j ON j.id=a.job_id
+     WHERE a.id=$1 AND a.job_id=$2 AND j.workspace_id=$3`,[artifactId,jobId,workspaceId],
+  );
+  const artifact = result.rows[0];
+  if (!artifact) { response.status(404).json({ error: "构建制品不存在" }); return; }
+  response.set({ "Content-Type":"application/octet-stream","Content-Disposition":`attachment; filename="${encodeURIComponent(artifact.name)}"`,"X-Content-SHA256":artifact.sha256 });
+  response.send(artifact.content);
+}));
+
 router.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof z.ZodError) {
     response.status(400).json({ error: "提交的数据格式不正确", fields: error.flatten().fieldErrors });
     return;
   }
   if (error instanceof multer.MulterError) {
-    response.status(400).json({ error: error.code === "LIMIT_FILE_SIZE" ? "固件文件不能超过 32 MiB" : "固件上传失败" });
+    response.status(400).json({ error: error.code === "LIMIT_FILE_SIZE" ? "上传文件超过大小限制" : "文件上传失败" });
     return;
   }
   const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 500;

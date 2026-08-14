@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+
+test("runner doctor reports its immutable build capability contract", () => {
+  const result = spawnSync(process.execPath, ["runner/stmweb-runner.mjs", "doctor"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as {
+    version: string;
+    capabilities: { architecture: string; maxConcurrentBuilds: number; toolchains: Array<{ id: string; targets: string[] }> };
+  };
+  assert.equal(report.version, "0.1.0");
+  assert.equal(report.capabilities.architecture, process.arch);
+  assert.equal(report.capabilities.maxConcurrentBuilds, 1);
+  assert.equal(report.capabilities.toolchains[0]?.id, "arm-none-eabi-gcc");
+  assert.deepEqual(report.capabilities.toolchains[0]?.targets, ["stm32f103c8", "stm32f103cb"]);
+});

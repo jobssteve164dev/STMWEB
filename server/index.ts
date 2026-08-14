@@ -6,6 +6,7 @@ import { internalAuthRouter } from "./internal-auth.js";
 import { pool } from "./database.js";
 import { env } from "./env.js";
 import { migrateDatabase } from "./migrate.js";
+import { runnerApiRouter } from "./runner-api.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,7 +20,15 @@ app.get("/health", async (_request, response) => {
   }
 });
 
+app.get("/install-runner.sh", (_request, response) => {
+  response.type("text/x-shellscript").sendFile(path.join(root, "runner", "install-runner.sh"));
+});
+app.get("/runner/stmweb-runner.mjs", (_request, response) => {
+  response.type("text/javascript").sendFile(path.join(root, "runner", "stmweb-runner.mjs"));
+});
+
 app.use("/api/internal-auth", internalAuthRouter);
+app.use("/api/runner", runnerApiRouter);
 app.use("/api", apiRouter);
 app.use(express.static(path.join(root, "dist"), { index: false, maxAge: "7d", immutable: true }));
 app.get("*", (_request, response) => response.sendFile(path.join(root, "dist", "index.html")));

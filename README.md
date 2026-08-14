@@ -15,6 +15,7 @@
 - 导入 `.bin`、`.hex`、`.elf`、`.axf`、`.srec` 固件，计算 SHA-256 后连同原文件保存为不可覆盖版本。
 - 以工作区隔离设备台账、固件版本和会话记录。
 - 无硬件时可以运行明确标识的演示会话，验证记录链路而不操作真实设备。
+- 工作区可用一次性配对命令接入 Homelab x86 Runner，在无网络、1 CPU / 1 GiB 的固定编译容器内构建 STM32 源码并保存制品。
 
 ## 本地运行
 
@@ -35,6 +36,8 @@ npm audit --audit-level=high
 ```
 
 生产构建输出到 `dist/` 和 `dist-server/`，由 Node.js 服务统一提供页面、鉴权与 API。
+
+编译 Runner 不需要平台登录 Homelab，也不需要开放节点入站端口。管理员在“编译与烧录”中生成命令并在 x86 Linux 节点执行；生产环境的 `STMWEB_BUILD_IMAGE` 应填写由 `Compiler image` 工作流发布后得到的 GHCR digest 引用。
 
 ## 当前边界
 

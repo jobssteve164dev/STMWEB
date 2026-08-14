@@ -51,6 +51,44 @@ export type WorkbenchComponentId =
   | "orientation" | "camera" | "motor" | "battery" | "chart"
   | "terminal" | "controls" | "events" | "firmware";
 
+export interface BuildRunnerRecord {
+  id: string;
+  name: string;
+  status: "online" | "busy" | "offline";
+  capabilities: {
+    architecture?: string;
+    backend?: string;
+    environmentVersion?: string;
+    toolchains?: Array<{ id: string; version: string; targets: string[] }>;
+  };
+  currentJobId?: string;
+  lastSeenAt?: string;
+}
+
+export interface BuildArtifactRecord {
+  id: string;
+  name: string;
+  kind: string;
+  sha256: string;
+  size: number;
+}
+
+export interface BuildJobRecord {
+  id: string;
+  runnerId: string;
+  runnerName: string;
+  name: string;
+  profile: string;
+  target: string;
+  sourceName: string;
+  sourceSha256: string;
+  status: "queued" | "leased" | "running" | "succeeded" | "failed" | "cancelled";
+  progress: number;
+  error?: string;
+  createdAt: string;
+  artifacts: BuildArtifactRecord[];
+}
+
 let activeWorkspaceId = "";
 
 export function configureWorkspace(workspaceId: string) {
@@ -153,4 +191,41 @@ export async function saveWorkbenchPreference(
     method: "PUT",
     body: JSON.stringify({ selectedComponents }),
   });
+}
+
+export async function listBuildRunners(): Promise<BuildRunnerRecord[]> {
+  const result = await requestJson<{ runners: BuildRunnerRecord[] }>(`/api/workspaces/${workspaceId()}/runners`);
+  return result.runners;
+}
+
+export async function createRunnerPairing(): Promise<{ code: string; expiresAt: string; command: string }> {
+  return requestJson(`/api/workspaces/${workspaceId()}/runners/pairing`, { method: "POST", body: "{}" });
+}
+
+export async function listBuildJobs(): Promise<BuildJobRecord[]> {
+  const result = await requestJson<{ builds: BuildJobRecord[] }>(`/api/workspaces/${workspaceId()}/builds`);
+  return result.builds;
+}
+
+export async function createBuildJob(input: {
+  runnerId: string;
+  name: string;
+  target: "stm32f103c8" | "stm32f103cb";
+  source: File;
+}): Promise<{ id: string; sha256: string }> {
+  const form = new FormData();
+  form.set("runnerId", input.runnerId);
+  form.set("name", input.name);
+  form.set("profile", "stm32-cmake-gcc-v1");
+  form.set("target", input.target);
+  form.set("source", input.source, input.source.name);
+  return requestJson(`/api/workspaces/${workspaceId()}/builds`, { method: "POST", body: form });
+}
+
+export async function cancelBuildJob(jobId: string): Promise<void> {
+  await requestJson(`/api/workspaces/${workspaceId()}/builds/${jobId}/cancel`, { method: "POST", body: "{}" });
+}
+
+export function buildArtifactUrl(jobId: string, artifactId: string): string {
+  return `/api/workspaces/${workspaceId()}/builds/${jobId}/artifacts/${artifactId}`;
 }

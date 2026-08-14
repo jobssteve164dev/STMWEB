@@ -116,6 +116,89 @@ CREATE TABLE IF NOT EXISTS workbench_preferences (
   CHECK (length(profile_key) BETWEEN 1 AND 160),
   CHECK (jsonb_typeof(selected_components) = 'array')
 );
+
+CREATE TABLE IF NOT EXISTS runner_pairing_codes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  code_hash text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS build_runners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  capabilities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status text NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'busy', 'offline')),
+  current_job_id uuid,
+  last_seen_at timestamptz,
+  revoked boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(capabilities) = 'object')
+);
+
+CREATE INDEX IF NOT EXISTS build_runners_workspace_idx ON build_runners(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS build_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  runner_id uuid NOT NULL REFERENCES build_runners(id) ON DELETE RESTRICT,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  name text NOT NULL,
+  profile text NOT NULL,
+  target text NOT NULL,
+  source_name text NOT NULL,
+  source_sha256 text NOT NULL CHECK (length(source_sha256) = 64),
+  source_content bytea NOT NULL,
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','leased','running','succeeded','failed','cancelled')),
+  desired_state text NOT NULL DEFAULT 'running' CHECK (desired_state IN ('running','cancelled')),
+  progress integer NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  lease_id text,
+  leased_at timestamptz,
+  started_at timestamptz,
+  finished_at timestamptz,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS build_jobs_workspace_idx ON build_jobs(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS build_jobs_runner_queue_idx ON build_jobs(runner_id, status, created_at);
+
+ALTER TABLE build_runners DROP CONSTRAINT IF EXISTS build_runners_current_job_id_fkey;
+ALTER TABLE build_runners ADD CONSTRAINT build_runners_current_job_id_fkey
+  FOREIGN KEY (current_job_id) REFERENCES build_jobs(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS build_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id uuid NOT NULL REFERENCES build_jobs(id) ON DELETE CASCADE,
+  event_id text NOT NULL UNIQUE,
+  type text NOT NULL CHECK (type IN ('accepted','started','progress','log','completed','failed','cancelled')),
+  message text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(payload) = 'object')
+);
+
+CREATE INDEX IF NOT EXISTS build_events_job_idx ON build_events(job_id, created_at);
+
+CREATE TABLE IF NOT EXISTS build_artifacts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id uuid NOT NULL REFERENCES build_jobs(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('elf','hex','bin','map','log','report')),
+  sha256 text NOT NULL CHECK (length(sha256) = 64),
+  size bigint NOT NULL CHECK (size >= 0),
+  content bytea NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (job_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS build_artifacts_job_idx ON build_artifacts(job_id, created_at);
 `;
 
 export async function migrateDatabase(): Promise<void> {

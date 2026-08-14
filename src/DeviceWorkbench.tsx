@@ -19,6 +19,7 @@ import {
   type DeviceCapabilityManifest,
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
+import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
 
 interface TelemetrySnapshot {
   pitch: number;
@@ -165,7 +166,7 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChang
             </article>
           ) : null}
 
-          {selected.includes("firmware") ? <article className="workbench-card compact-action-widget"><FileCode2 size={21} /><div><strong>编译与烧录</strong><span>选择源码版本后创建构建；实物兼容性验证通过前不会写入设备。</span></div><button type="button" disabled>创建构建</button></article> : null}
+          {selected.includes("firmware") ? <BuildRunnerPanel /> : null}
           {selected.includes("terminal") ? <article className="workbench-card compact-action-widget"><SquareTerminal size={21} /><div><strong>调试终端</strong><span>原始输出继续显示在下方会话终端，并随调试会话保存。</span></div></article> : null}
           {selected.includes("events") ? <article className="workbench-card compact-action-widget"><ListChecks size={21} /><div><strong>事件记录</strong><span>连接、参数、控制、构建和烧录操作统一进入当前会话。</span></div></article> : null}
         </div>

@@ -17,6 +17,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
 COPY deploy ./deploy
+COPY runner/stmweb-runner.mjs runner/install-runner.sh ./runner/
 RUN chmod +x /app/deploy/database-migrate
 
 EXPOSE 8080

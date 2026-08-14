@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 process.env.DATABASE_URL ||= "postgresql://test:test@127.0.0.1:5432/test";
@@ -25,4 +26,11 @@ test("CloudMCP provider exposes only implemented STMWEB operations", () => {
   assert.equal(STMWEB_CLOUDMCP_TOOLS.some((tool) => tool.name.includes("flash")), false);
   const build = STMWEB_CLOUDMCP_TOOLS.find((tool) => tool.name === "start_stmweb_firmware_build");
   assert.deepEqual("required" in build!.inputSchema ? build!.inputSchema.required : [], ["runner_id", "repository", "source_revision", "target"]);
+});
+
+test("CloudMCP provider deployment uses the public environment contract", () => {
+  const compose = readFileSync("docker-compose.yml", "utf8");
+  assert.match(compose, /CLOUDMCP_BRIDGE_CLIENT_ID:/);
+  assert.match(compose, /CLOUDMCP_BRIDGE_CLIENT_SECRET:/);
+  assert.doesNotMatch(compose, /STMWEB_CLOUDMCP_BRIDGE_CLIENT/);
 });

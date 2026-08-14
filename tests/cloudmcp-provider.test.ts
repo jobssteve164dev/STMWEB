@@ -7,9 +7,9 @@ process.env.BETTER_AUTH_URL ||= "http://127.0.0.1:8080";
 process.env.STMWEB_ADMIN_USERNAME ||= "admin";
 process.env.STMWEB_ADMIN_PASSWORD ||= "test-password-long-enough";
 process.env.STMWEB_BUILD_IMAGE_ID = "";
-process.env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_ID = "";
-process.env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET = "";
-process.env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT = "";
+process.env.CLOUDMCP_BRIDGE_CLIENT_ID = "";
+process.env.CLOUDMCP_BRIDGE_CLIENT_SECRET = "";
+process.env.CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT = "";
 
 const { STMWEB_CLOUDMCP_TOOLS } = await import("../server/cloudmcp-provider.js");
 

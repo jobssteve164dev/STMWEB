@@ -70,8 +70,8 @@ function safeEqual(actual: string, expected: string): boolean {
 }
 
 function authenticate(request: Request): void {
-  const clientId = env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_ID;
-  const secrets = [env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET, env.STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT].filter((value): value is string => Boolean(value));
+  const clientId = env.CLOUDMCP_BRIDGE_CLIENT_ID;
+  const secrets = [env.CLOUDMCP_BRIDGE_CLIENT_SECRET, env.CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT].filter((value): value is string => Boolean(value));
   if (!clientId || secrets.length === 0) throw Object.assign(new Error("CloudMCP provider bridge is not configured"), { status: 503 });
   const declaredClient = request.get("X-CloudMCP-Bridge-Client") || "";
   const authorization = request.get("Authorization") || "";

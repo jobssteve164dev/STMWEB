@@ -15,9 +15,9 @@ const environmentSchema = z.object({
   STMWEB_ADMIN_PASSWORD: z.string().min(12).max(256),
   STMWEB_BUILD_IMAGE: z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).default("stmweb/compiler:v0.1.0"),
   STMWEB_BUILD_IMAGE_ID: optionalString(z.string().regex(/^sha256:[a-f0-9]{64}$/)),
-  STMWEB_CLOUDMCP_BRIDGE_CLIENT_ID: optionalString(z.string().min(1)),
-  STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET: optionalString(z.string().min(32)),
-  STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT: optionalString(z.string().min(32)),
+  CLOUDMCP_BRIDGE_CLIENT_ID: optionalString(z.string().min(1)),
+  CLOUDMCP_BRIDGE_CLIENT_SECRET: optionalString(z.string().min(32)),
+  CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT: optionalString(z.string().min(32)),
   STMWEB_CLOUDMCP_SOURCE_REPOSITORIES: z.string().default("jobssteve164dev/STMWEB"),
 });
 

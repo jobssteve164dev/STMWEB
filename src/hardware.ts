@@ -15,9 +15,17 @@ export interface HardwareConnection {
   close: () => Promise<void>;
 }
 
+export interface SerialConnectionOptions {
+  baudRate: number;
+  dataBits: 7 | 8;
+  stopBits: 1 | 2;
+  parity: "none" | "even" | "odd";
+  flowControl: "none" | "hardware";
+}
+
 interface SerialPortLike {
   readable: ReadableStream<Uint8Array> | null;
-  open(options: { baudRate: number }): Promise<void>;
+  open(options: SerialConnectionOptions): Promise<void>;
   close(): Promise<void>;
   getInfo?(): { usbVendorId?: number; usbProductId?: number };
 }
@@ -70,7 +78,7 @@ const capabilityDefinitions: Array<Omit<HardwareCapability, "supported" | "permi
   {
     id: "serial",
     label: "串口",
-    description: "读取 115200 baud 串口日志",
+    description: "选择端口并设置串口参数",
   },
   {
     id: "usb",
@@ -141,14 +149,25 @@ function hexadecimal(value?: number): string {
 
 export async function requestHardwareConnection(
   kind: HardwareCapabilityId,
-  options: { networkUrl?: string; onSerialText?: (text: string) => void } = {},
+  options: {
+    networkUrl?: string;
+    serial?: SerialConnectionOptions;
+    onSerialText?: (text: string) => void;
+  } = {},
 ): Promise<HardwareConnection> {
   const hardwareNavigator = navigator as HardwareNavigator;
 
   if (kind === "serial") {
     if (!hardwareNavigator.serial) throw new Error("当前浏览器不支持串口访问");
     const port = await hardwareNavigator.serial.requestPort();
-    await port.open({ baudRate: 115200 });
+    const serial = options.serial ?? {
+      baudRate: 115200,
+      dataBits: 8,
+      stopBits: 1,
+      parity: "none",
+      flowControl: "none",
+    };
+    await port.open(serial);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let closed = false;
 
@@ -176,7 +195,7 @@ export async function requestHardwareConnection(
     return {
       kind,
       name: "串口设备",
-      detail: `VID ${hexadecimal(info.usbVendorId)} · PID ${hexadecimal(info.usbProductId)} · 115200 baud`,
+      detail: `VID ${hexadecimal(info.usbVendorId)} · PID ${hexadecimal(info.usbProductId)} · ${serial.baudRate} baud · ${serial.dataBits}${serial.parity === "none" ? "N" : serial.parity === "even" ? "E" : "O"}${serial.stopBits}${serial.flowControl === "hardware" ? " · 硬件流控" : ""}`,
       close: async () => {
         closed = true;
         await reader?.cancel().catch(() => undefined);

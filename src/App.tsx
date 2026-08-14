@@ -61,6 +61,7 @@ import {
 import {
   inspectHardwareCapabilities,
   requestHardwareConnection,
+  type SerialConnectionOptions,
   type HardwareCapability,
   type HardwareCapabilityId,
   type HardwareConnection,
@@ -138,6 +139,8 @@ const sessionDateFormatter = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
 });
 
+const commonBaudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -192,6 +195,12 @@ function App({ workspace, user, onSignOut }: AppProps) {
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [selectedCapability, setSelectedCapability] = useState<HardwareCapabilityId | null>(null);
   const [networkUrl, setNetworkUrl] = useState("http://192.168.1.50/health");
+  const [serialBaudRate, setSerialBaudRate] = useState("115200");
+  const [customBaudRate, setCustomBaudRate] = useState("115200");
+  const [serialDataBits, setSerialDataBits] = useState<SerialConnectionOptions["dataBits"]>(8);
+  const [serialStopBits, setSerialStopBits] = useState<SerialConnectionOptions["stopBits"]>(1);
+  const [serialParity, setSerialParity] = useState<SerialConnectionOptions["parity"]>("none");
+  const [serialFlowControl, setSerialFlowControl] = useState<SerialConnectionOptions["flowControl"]>("none");
   const [connecting, setConnecting] = useState<HardwareCapabilityId | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null);
   const [currentSession, setCurrentSession] = useState<DebugSessionRecord | null>(null);
@@ -419,8 +428,19 @@ function App({ workspace, user, onSignOut }: AppProps) {
   async function connectHardware(kind: HardwareCapabilityId) {
     setConnecting(kind);
     try {
+      const baudRate = Number(serialBaudRate === "custom" ? customBaudRate : serialBaudRate);
+      if (kind === "serial" && (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4_000_000)) {
+        throw new Error("波特率请输入 300 到 4000000 之间的整数");
+      }
       const connection = await requestHardwareConnection(kind, {
         networkUrl,
+        serial: {
+          baudRate,
+          dataBits: serialDataBits,
+          stopBits: serialStopBits,
+          parity: serialParity,
+          flowControl: serialFlowControl,
+        },
         onSerialText: (text) => appendEvent("data", text.trim() || "收到串口数据"),
       });
       connectionRef.current = connection;
@@ -805,6 +825,17 @@ function App({ workspace, user, onSignOut }: AppProps) {
             </div>
             {selectedCapability === "network" ? (
               <label className="network-field"><span>设备地址</span><input type="url" value={networkUrl} onChange={(event) => setNetworkUrl(event.target.value)} placeholder="http://192.168.1.50/health" /><small>设备需要提供可跨域访问的 HTTP 健康检查地址。</small></label>
+            ) : null}
+            {selectedCapability === "serial" ? (
+              <div className="serial-settings" aria-label="串口参数">
+                <div className="serial-channel"><span>端口通道</span><strong>下一步在系统选择器中选择 COM / tty 端口</strong></div>
+                <label><span>波特率</span><select value={serialBaudRate} onChange={(event) => setSerialBaudRate(event.target.value)}>{commonBaudRates.map((rate) => <option key={rate} value={rate}>{rate}</option>)}<option value="custom">自定义</option></select></label>
+                {serialBaudRate === "custom" ? <label><span>自定义波特率</span><input type="number" min="300" max="4000000" step="1" value={customBaudRate} onChange={(event) => setCustomBaudRate(event.target.value)} /></label> : null}
+                <label><span>数据位</span><select value={serialDataBits} onChange={(event) => setSerialDataBits(Number(event.target.value) as 7 | 8)}><option value="8">8</option><option value="7">7</option></select></label>
+                <label><span>校验位</span><select value={serialParity} onChange={(event) => setSerialParity(event.target.value as SerialConnectionOptions["parity"])}><option value="none">无</option><option value="even">偶校验</option><option value="odd">奇校验</option></select></label>
+                <label><span>停止位</span><select value={serialStopBits} onChange={(event) => setSerialStopBits(Number(event.target.value) as 1 | 2)}><option value="1">1</option><option value="2">2</option></select></label>
+                <label><span>流控</span><select value={serialFlowControl} onChange={(event) => setSerialFlowControl(event.target.value as SerialConnectionOptions["flowControl"])}><option value="none">无</option><option value="hardware">硬件 RTS/CTS</option></select></label>
+              </div>
             ) : null}
             <div className="dialog-footer"><div>{activeCapability ? <><CircleAlert size={16} /><span>{activeCapability.id === "network" ? "首次访问局域网时，浏览器会请求网络权限。" : "下一步将打开浏览器的系统设备选择器。"}</span></> : <span>选择一种方式继续</span>}</div><button className="primary-button" type="button" disabled={!selectedCapability || Boolean(connecting)} onClick={() => selectedCapability && void connectHardware(selectedCapability)}>{connecting ? <Loader2 size={17} className="spinning" /> : <Plug size={17} />}{connecting ? "正在连接" : "继续连接"}</button></div>
           </section>

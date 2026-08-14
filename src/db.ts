@@ -47,6 +47,10 @@ export interface DeviceRecord {
   note: string;
 }
 
+export type WorkbenchComponentId =
+  | "orientation" | "camera" | "motor" | "battery" | "chart"
+  | "terminal" | "controls" | "events" | "firmware";
+
 let activeWorkspaceId = "";
 
 export function configureWorkspace(workspaceId: string) {
@@ -132,4 +136,21 @@ export async function createDevice(
     { method: "POST", body: JSON.stringify(device) },
   );
   return result.device;
+}
+
+export async function loadWorkbenchPreference(profileKey: string): Promise<WorkbenchComponentId[] | null> {
+  const result = await requestJson<{ selectedComponents: WorkbenchComponentId[] | null }>(
+    `/api/workspaces/${workspaceId()}/workbench/${encodeURIComponent(profileKey)}`,
+  );
+  return result.selectedComponents;
+}
+
+export async function saveWorkbenchPreference(
+  profileKey: string,
+  selectedComponents: WorkbenchComponentId[],
+): Promise<void> {
+  await requestJson(`/api/workspaces/${workspaceId()}/workbench/${encodeURIComponent(profileKey)}`, {
+    method: "PUT",
+    body: JSON.stringify({ selectedComponents }),
+  });
 }

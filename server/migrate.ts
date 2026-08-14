@@ -105,6 +105,17 @@ CREATE TABLE IF NOT EXISTS debug_events (
 );
 
 CREATE INDEX IF NOT EXISTS events_session_idx ON debug_events(session_id, sequence);
+
+CREATE TABLE IF NOT EXISTS workbench_preferences (
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  profile_key text NOT NULL,
+  selected_components jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, profile_key),
+  CHECK (length(profile_key) BETWEEN 1 AND 160),
+  CHECK (jsonb_typeof(selected_components) = 'array')
+);
 `;
 
 export async function migrateDatabase(): Promise<void> {

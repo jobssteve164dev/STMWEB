@@ -10,6 +10,7 @@
     "build:client": "tsc -b && vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
     "check": "npm run typecheck && npm run build",
     "preview": "vite preview --host 127.0.0.1",
     "start": "node dist-server/index.js"

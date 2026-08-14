@@ -6,7 +6,6 @@ import {
   Check,
   CircleAlert,
   CircleDot,
-  Clock3,
   Cpu,
   Database,
   Download,
@@ -19,16 +18,13 @@ import {
   Loader2,
   LogOut,
   MemoryStick,
-  Pause,
   Play,
   Plug,
   Radio,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
   Square,
   SquareTerminal,
-  StepForward,
   Upload,
   Usb,
   Wifi,
@@ -53,6 +49,8 @@ import {
   saveEvent,
   saveFirmwareVersion,
   saveSession,
+  loadWorkbenchPreference,
+  saveWorkbenchPreference,
   type DebugEventRecord,
   type DebugSessionRecord,
   type FirmwareVersionRecord,
@@ -66,6 +64,14 @@ import {
   type HardwareCapabilityId,
   type HardwareConnection,
 } from "./hardware.js";
+import { DeviceWorkbench, type TelemetrySnapshot } from "./DeviceWorkbench.js";
+import {
+  demoCapabilityManifest,
+  parseCapabilityManifest,
+  recommendedComponents,
+  type DeviceCapabilityManifest,
+  type DeviceCapabilityType,
+} from "./device-capabilities.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions";
 
@@ -141,6 +147,19 @@ const sessionDateFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 const commonBaudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
+const emptyTelemetrySnapshot: TelemetrySnapshot = {
+  pitch: 0,
+  roll: 0,
+  gyro: 0,
+  leftSpeed: 0,
+  rightSpeed: 0,
+  leftPwm: 0,
+  rightPwm: 0,
+  voltage: 0,
+  lineOffset: 0,
+  lineAngle: 0,
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -208,6 +227,9 @@ function App({ workspace, user, onSignOut }: AppProps) {
   const [firmwareVersions, setFirmwareVersions] = useState<FirmwareVersionRecord[]>([]);
   const [logs, setLogs] = useState<DebugEventRecord[]>([]);
   const [telemetry, setTelemetry] = useState<number[]>([]);
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot>(emptyTelemetrySnapshot);
+  const [deviceManifest, setDeviceManifest] = useState<DeviceCapabilityManifest | null>(null);
+  const [selectedComponents, setSelectedComponents] = useState<DeviceCapabilityType[]>([]);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [storageHealthy, setStorageHealthy] = useState(true);
   const [fileBusy, setFileBusy] = useState(false);
@@ -260,6 +282,26 @@ function App({ workspace, user, onSignOut }: AppProps) {
       active = false;
     };
   }, [workspace.id]);
+
+  useEffect(() => {
+    if (!deviceManifest) return;
+    let active = true;
+    void loadWorkbenchPreference(deviceManifest.device.id)
+      .then((saved) => {
+        if (!active) return;
+        setSelectedComponents(saved ?? recommendedComponents(deviceManifest));
+      })
+      .catch(() => {
+        if (active) setSelectedComponents(recommendedComponents(deviceManifest));
+      });
+    return () => { active = false; };
+  }, [deviceManifest, workspace.id]);
+
+  function updateSelectedComponents(selected: DeviceCapabilityType[]) {
+    setSelectedComponents(selected);
+    if (!deviceManifest) return;
+    void saveWorkbenchPreference(deviceManifest.device.id, selected).catch(handleStorageError);
+  }
 
   async function submitDevice(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -371,6 +413,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
     setCurrentSession(session);
     setLogs([]);
     setTelemetry([]);
+    setTelemetrySnapshot(emptyTelemetrySnapshot);
     void saveSession(session).catch(handleStorageError);
     appendEvent("success", `会话已开始 · ${session.connectionLabel}`);
 
@@ -381,7 +424,23 @@ function App({ workspace, user, onSignOut }: AppProps) {
         const temperature = 24.1 + Math.sin(tick / 4) * 1.3 + Math.random() * 0.2;
         const voltage = 3.29 + Math.sin(tick / 7) * 0.025;
         const signal = -54 + Math.round(Math.sin(tick / 3) * 4);
+        const pitch = Math.sin(tick / 3) * 8;
+        const roll = Math.cos(tick / 5) * 4;
+        const leftSpeed = 128 + Math.sin(tick / 2) * 24;
+        const rightSpeed = 124 + Math.cos(tick / 2.4) * 21;
         setTelemetry((current) => [...current, temperature].slice(-48));
+        setTelemetrySnapshot({
+          pitch,
+          roll,
+          gyro: Math.cos(tick / 3) * 12,
+          leftSpeed,
+          rightSpeed,
+          leftPwm: 42 + Math.sin(tick / 4) * 8,
+          rightPwm: 40 + Math.cos(tick / 4) * 7,
+          voltage,
+          lineOffset: Math.sin(tick / 2.5) * 14,
+          lineAngle: Math.cos(tick / 3.5) * 9,
+        });
         appendEvent("data", `TEMP=${temperature.toFixed(2)}°C  VBUS=${voltage.toFixed(3)}V  RSSI=${signal}dBm`, {
           temperature: Number(temperature.toFixed(2)),
           voltage: Number(voltage.toFixed(3)),
@@ -422,6 +481,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
         isDemo: true,
       });
     }
+    setDeviceManifest(demoCapabilityManifest);
     startSession({ isDemo: true, label: "演示设备" });
   }
 
@@ -441,7 +501,18 @@ function App({ workspace, user, onSignOut }: AppProps) {
           parity: serialParity,
           flowControl: serialFlowControl,
         },
-        onSerialText: (text) => appendEvent("data", text.trim() || "收到串口数据"),
+        onSerialText: (text) => {
+          const manifest = parseCapabilityManifest(text);
+          if (manifest) {
+            setDeviceManifest(manifest);
+            appendEvent("success", `已识别 ${manifest.capabilities.length} 项设备能力`, {
+              model: manifest.device.model,
+              firmwareVersion: manifest.device.firmwareVersion,
+            });
+            return;
+          }
+          appendEvent("data", text.trim() || "收到串口数据");
+        },
       });
       connectionRef.current = connection;
       setConnectionInfo({
@@ -450,6 +521,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
         kind: connection.kind,
         isDemo: false,
       });
+      if (kind !== "serial") setDeviceManifest(null);
       setConnectionDialogOpen(false);
       setSelectedCapability(null);
       setToast({ tone: "success", message: `${connection.name} 已连接` });
@@ -468,6 +540,8 @@ function App({ workspace, user, onSignOut }: AppProps) {
     await connectionRef.current?.close().catch(() => undefined);
     connectionRef.current = null;
     setConnectionInfo(null);
+    setDeviceManifest(null);
+    setSelectedComponents([]);
     setTelemetry([]);
     setLogs([]);
     setToast({ tone: "info", message: "设备连接已断开" });
@@ -515,14 +589,6 @@ function App({ workspace, user, onSignOut }: AppProps) {
       setToast({ tone: "warning", message: "会话导出失败，请稍后重试" });
     }
   }
-
-  const chartPoints = telemetry.length > 1
-    ? telemetry.map((value, index) => {
-        const x = (index / Math.max(telemetry.length - 1, 1)) * 720;
-        const y = 168 - ((value - 21.5) / 6) * 128;
-        return `${x.toFixed(1)},${Math.max(18, Math.min(172, y)).toFixed(1)}`;
-      }).join(" ")
-    : "";
 
   const currentTemperature = telemetry.at(-1);
   const storageLabel = storageHealthy ? "工作区数据库" : "暂不可用";
@@ -656,69 +722,22 @@ function App({ workspace, user, onSignOut }: AppProps) {
                 <MetricCard label="实时温度" value={currentTemperature ? `${currentTemperature.toFixed(1)}°C` : "—"} note={currentSession?.isDemo ? "演示遥测" : "等待数据"} icon={Gauge} />
               </section>
 
-              <section className="dashboard-grid">
-                <article className="panel chart-panel">
-                  <div className="panel-heading">
-                    <div><span className="panel-kicker">实时遥测</span><h2>传感器温度</h2></div>
-                    <span className="live-indicator"><span />{currentSession ? "正在记录" : "暂无数据"}</span>
-                  </div>
-                  <div className="chart-wrap">
-                    <div className="chart-summary">
-                      <strong>{currentTemperature ? currentTemperature.toFixed(2) : "--.--"}<small>°C</small></strong>
-                      <span>最近 48 个采样点</span>
-                    </div>
-                    <svg className="telemetry-chart" viewBox="0 0 720 190" role="img" aria-label={currentTemperature ? `当前温度 ${currentTemperature.toFixed(2)} 摄氏度` : "尚无温度数据"}>
-                      {[34, 78, 122, 166].map((y) => <line key={y} x1="0" y1={y} x2="720" y2={y} className="grid-line" />)}
-                      {chartPoints ? (
-                        <>
-                          <polyline points={chartPoints} className="chart-glow" />
-                          <polyline points={chartPoints} className="chart-line" />
-                        </>
-                      ) : (
-                        <line x1="0" y1="100" x2="720" y2="100" className="empty-line" />
-                      )}
-                    </svg>
-                  </div>
-                  <div className="chart-legend">
-                    <span><i className="legend-dot temperature" />温度</span>
-                    <span><Clock3 size={14} />采样间隔 1 秒</span>
-                  </div>
-                </article>
+              {deviceManifest ? (
+                <DeviceWorkbench
+                  manifest={deviceManifest}
+                  selected={selectedComponents}
+                  telemetry={telemetrySnapshot}
+                  isDemo={Boolean(connectionInfo?.isDemo)}
+                  onChange={updateSelectedComponents}
+                />
+              ) : connectionInfo ? (
+                <section className="manifest-waiting" aria-live="polite">
+                  <Loader2 className="spinning" size={22} />
+                  <div><strong>正在识别设备能力</strong><span>固件报告硬件状态后，可选择本次需要的调试组件。</span></div>
+                </section>
+              ) : null}
 
-                <article className="panel controls-panel">
-                  <div className="panel-heading">
-                    <div><span className="panel-kicker">目标控制</span><h2>运行状态</h2></div>
-                    <span className={connectionInfo?.isDemo ? "target-state ready" : "target-state"}>
-                      {connectionInfo?.isDemo ? "演示可用" : connectionInfo ? "仅数据连接" : "未连接"}
-                    </span>
-                  </div>
-                  <div className="control-cluster">
-                    {[
-                      { label: "复位", icon: RotateCcw },
-                      { label: "运行", icon: Play },
-                      { label: "暂停", icon: Pause },
-                      { label: "单步", icon: StepForward },
-                    ].map(({ label, icon: Icon }) => (
-                      <button
-                        key={label}
-                        type="button"
-                        disabled={!connectionInfo?.isDemo}
-                        onClick={() => appendEvent("success", `演示设备已执行：${label}`)}
-                      >
-                        <Icon size={18} aria-hidden="true" /><span>{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <dl className="target-facts">
-                    <div><dt>MCU</dt><dd>{selectedDevice.model}</dd></div>
-                    <div><dt>时钟</dt><dd>{selectedDevice.clock}</dd></div>
-                    <div><dt>Flash</dt><dd>{selectedDevice.flash}</dd></div>
-                    <div><dt>连接</dt><dd>{connectionInfo?.kind.toUpperCase() ?? "—"}</dd></div>
-                  </dl>
-                  <button className="text-action" type="button" onClick={() => setActiveView("firmware")}>
-                    <Upload size={16} />导入固件版本
-                  </button>
-                </article>
+              <section className="dashboard-grid support-dashboard-grid">
 
                 <article className="panel terminal-panel">
                   <div className="panel-heading terminal-heading">

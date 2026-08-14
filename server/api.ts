@@ -38,6 +38,10 @@ const eventSchema = z.object({
   message: z.string().min(1).max(20_000),
   payload: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).optional(),
 });
+const workbenchComponent = z.enum([
+  "orientation", "camera", "motor", "battery", "chart", "terminal", "controls", "events", "firmware",
+]);
+const profileKey = z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9._:-]+$/);
 
 function asyncRoute(
   handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
@@ -261,6 +265,35 @@ router.post("/sessions/:sessionId/events", asyncRoute(async (request, response) 
     );
   });
   response.status(201).json({ success: true });
+}));
+
+router.get("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const key = profileKey.parse(request.params.profileKey);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query<{ selectedComponents: string[] }>(
+    `SELECT selected_components AS "selectedComponents"
+     FROM workbench_preferences WHERE workspace_id = $1 AND profile_key = $2`,
+    [workspaceId, key],
+  );
+  response.json({ selectedComponents: result.rows[0]?.selectedComponents ?? null });
+}));
+
+router.put("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const key = profileKey.parse(request.params.profileKey);
+  const selectedComponents = z.array(workbenchComponent).max(20).parse(request.body.selectedComponents);
+  await requireWorkspace(user.id, workspaceId, true);
+  await pool.query(
+    `INSERT INTO workbench_preferences (workspace_id, profile_key, selected_components, updated_by)
+     VALUES ($1, $2, $3::jsonb, $4)
+     ON CONFLICT (workspace_id, profile_key) DO UPDATE
+       SET selected_components = EXCLUDED.selected_components, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [workspaceId, key, JSON.stringify(selectedComponents), user.id],
+  );
+  response.json({ success: true });
 }));
 
 router.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {

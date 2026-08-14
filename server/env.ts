@@ -10,6 +10,10 @@ const environmentSchema = z.object({
   STMWEB_ADMIN_PASSWORD: z.string().min(12).max(256),
   STMWEB_BUILD_IMAGE: z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).default("stmweb/compiler:v0.1.0"),
   STMWEB_BUILD_IMAGE_ID: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  STMWEB_CLOUDMCP_BRIDGE_CLIENT_ID: z.string().min(1).optional(),
+  STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET: z.string().min(32).optional(),
+  STMWEB_CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT: z.string().min(32).optional(),
+  STMWEB_CLOUDMCP_SOURCE_REPOSITORIES: z.string().default("jobssteve164dev/STMWEB"),
 });
 
 const parsed = environmentSchema.safeParse(process.env);

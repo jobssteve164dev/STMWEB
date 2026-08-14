@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { apiRouter } from "./api.js";
+import { cloudmcpProviderRouter } from "./cloudmcp-provider.js";
 import { internalAuthRouter } from "./internal-auth.js";
 import { pool } from "./database.js";
 import { env } from "./env.js";
@@ -28,6 +29,7 @@ app.get("/runner/stmweb-runner.mjs", (_request, response) => {
 });
 
 app.use("/api/internal-auth", internalAuthRouter);
+app.use("/api/provider-bridge", cloudmcpProviderRouter);
 app.use("/api/runner", runnerApiRouter);
 app.use("/api", apiRouter);
 app.use(express.static(path.join(root, "dist"), { index: false, maxAge: "7d", immutable: true }));

@@ -4,7 +4,7 @@
 
 ## 第一版能力
 
-- 使用 GitHub OAuth 登录，不开放密码注册；只有服务端白名单中的账号可进入。
+- 使用管理员预置的内部账号登录，不依赖外部身份服务，也不开放公开注册。
 - 会话存放在 PostgreSQL，并对所有工作区接口执行成员权限与同源写入校验。
 - 统一入口连接串口、USB、HID 调试探针、蓝牙和局域网设备。
 - 自动检测当前浏览器能力，只在用户发起连接时请求系统授权。
@@ -16,7 +16,7 @@
 
 ## 本地运行
 
-需要 Node.js 22、PostgreSQL 16+ 和 Chromium 系浏览器。先复制 `.env.example` 为 `.env`，配置数据库、GitHub OAuth 应用和允许登录的邮箱；GitHub 回调地址是 `http://127.0.0.1:8080/api/auth/callback/github`。
+需要 Node.js 22、PostgreSQL 16+ 和 Chromium 系浏览器。先复制 `.env.example` 为 `.env`，配置数据库、内部管理员账号和高强度密码。
 
 ```bash
 npm install

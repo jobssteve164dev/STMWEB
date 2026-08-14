@@ -89,7 +89,7 @@ interface MetricCardProps {
 
 interface AppProps {
   workspace: { id: string; name: string; slug: string; role: string };
-  user: { id: string; email: string; name: string };
+  user: { id: string; username: string; name: string };
   onSignOut: () => void;
 }
 

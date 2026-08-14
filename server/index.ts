@@ -1,9 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { toNodeHandler } from "better-auth/node";
 import { apiRouter } from "./api.js";
-import { auth } from "./auth.js";
+import { internalAuthRouter } from "./internal-auth.js";
 import { pool } from "./database.js";
 import { env } from "./env.js";
 import { migrateDatabase } from "./migrate.js";
@@ -20,7 +19,7 @@ app.get("/health", async (_request, response) => {
   }
 });
 
-app.all("/api/auth/*", toNodeHandler(auth));
+app.use("/api/internal-auth", internalAuthRouter);
 app.use("/api", apiRouter);
 app.use(express.static(path.join(root, "dist"), { index: false, maxAge: "7d", immutable: true }));
 app.get("*", (_request, response) => response.sendFile(path.join(root, "dist", "index.html")));

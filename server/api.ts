@@ -1,14 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
 import express from "express";
 import multer from "multer";
-import { fromNodeHeaders } from "better-auth/node";
 import { z } from "zod";
-import { auth } from "./auth.js";
 import { pool, withTransaction } from "./database.js";
-import { allowedEmails, env } from "./env.js";
+import { env } from "./env.js";
+import { requireInternalSession } from "./internal-auth.js";
 
 interface AuthenticatedRequest extends Request {
-  currentUser: { id: string; email: string; name: string };
+  currentUser: { id: string; username: string; name: string };
 }
 
 const router = express.Router();
@@ -58,25 +57,6 @@ function verifyOrigin(request: Request, response: Response, next: NextFunction) 
   next();
 }
 
-async function requireSession(request: Request, response: Response, next: NextFunction) {
-  const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-  if (!session?.user?.id || !session.user.email) {
-    response.status(401).json({ error: "请先登录" });
-    return;
-  }
-  const email = session.user.email.toLowerCase();
-  if (!allowedEmails.has(email)) {
-    response.status(403).json({ error: "此 GitHub 账号尚未获得 STMWEB 使用权限" });
-    return;
-  }
-  (request as AuthenticatedRequest).currentUser = {
-    id: session.user.id,
-    email,
-    name: session.user.name,
-  };
-  next();
-}
-
 async function requireWorkspace(
   userId: string,
   workspaceId: string,
@@ -95,7 +75,7 @@ async function requireWorkspace(
 }
 
 router.use(verifyOrigin);
-router.use(asyncRoute(requireSession));
+router.use(requireInternalSession);
 router.use(express.json({ limit: "1mb" }));
 
 router.get("/me", (request, response) => {

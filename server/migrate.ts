@@ -1,22 +1,42 @@
-import { getMigrations } from "better-auth/db/migration";
-import { auth } from "./auth.js";
 import { pool } from "./database.js";
+import { ensureBootstrapUser } from "./internal-auth.js";
 
 const businessSchema = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS internal_users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  username text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  display_name text NOT NULL,
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS internal_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES internal_users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS internal_sessions_expiry_idx ON internal_sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS workspaces (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
-  owner_user_id text NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  owner_user_id uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS workspace_members (
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES internal_users(id) ON DELETE CASCADE,
   role text NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, user_id)
@@ -43,7 +63,7 @@ CREATE TABLE IF NOT EXISTS firmware_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
-  uploaded_by text NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  uploaded_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
   file_name text NOT NULL,
   file_size bigint NOT NULL CHECK (file_size >= 0),
   file_type text NOT NULL,
@@ -59,7 +79,7 @@ CREATE TABLE IF NOT EXISTS debug_sessions (
   id uuid PRIMARY KEY,
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
-  created_by text NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
   device_name text NOT NULL,
   connection_label text NOT NULL,
   started_at timestamptz NOT NULL,
@@ -88,7 +108,6 @@ CREATE INDEX IF NOT EXISTS events_session_idx ON debug_events(session_id, sequen
 `;
 
 export async function migrateDatabase(): Promise<void> {
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
   await pool.query(businessSchema);
+  await ensureBootstrapUser();
 }

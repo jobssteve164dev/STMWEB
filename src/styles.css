@@ -69,6 +69,133 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.app-loading,
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.app-loading {
+  align-content: center;
+  gap: 12px;
+  color: var(--text-soft);
+}
+
+.login-page {
+  padding: 24px;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(64, 216, 181, 0.13), transparent 34%),
+    radial-gradient(circle at 82% 78%, rgba(105, 169, 255, 0.12), transparent 30%),
+    var(--bg);
+}
+
+.login-card {
+  width: min(100%, 430px);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(16, 26, 37, 0.96);
+  padding: 34px;
+  box-shadow: var(--shadow);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--text);
+  letter-spacing: 0.12em;
+}
+
+.login-brand > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(64, 216, 181, 0.36);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.login-copy {
+  margin-top: 42px;
+}
+
+.login-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-copy h1 {
+  margin-top: 12px;
+  font-size: clamp(28px, 7vw, 36px);
+  letter-spacing: -0.04em;
+}
+
+.login-copy p {
+  margin-top: 14px;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
+
+.github-login {
+  display: flex;
+  width: 100%;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 750;
+}
+
+.github-login:hover:not(:disabled) {
+  background: #fff;
+}
+
+.login-error {
+  margin-top: 20px;
+  border: 1px solid rgba(255, 128, 122, 0.34);
+  border-radius: 10px;
+  background: rgba(255, 128, 122, 0.09);
+  padding: 12px 14px;
+  color: #ffaaa6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-footnote {
+  margin-top: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.account-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 4px;
+  color: var(--text-muted);
+}
+
+.account-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
 h1,
 h2,
 p {
@@ -1417,6 +1544,51 @@ td small {
   padding: 0 13px;
   color: var(--text);
   font-size: 13px;
+}
+
+.device-form {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.device-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 22px 24px;
+}
+
+.device-form-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.device-form-grid input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1523;
+  color: var(--text);
+  padding: 11px 12px;
+  font: inherit;
+  outline: none;
+}
+
+.device-form-grid input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(49, 189, 190, 0.12);
+}
+
+.table-panel tbody tr {
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .device-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .network-field small {

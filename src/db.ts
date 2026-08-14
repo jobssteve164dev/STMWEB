@@ -3,7 +3,7 @@ export type SessionStatus = "recording" | "completed" | "interrupted";
 export interface DebugSessionRecord {
   id: string;
   projectId: string;
-  deviceId: string;
+  deviceId?: string;
   deviceName: string;
   connectionLabel: string;
   startedAt: string;
@@ -31,95 +31,105 @@ export interface FirmwareVersionRecord {
   fileType: string;
   sha256: string;
   createdAt: string;
-  blob: Blob;
+  blob?: Blob;
 }
 
-const DATABASE_NAME = "stmweb-prototype";
-const DATABASE_VERSION = 1;
+export interface DeviceRecord {
+  id: string;
+  workspaceId: string;
+  name: string;
+  model: string;
+  board: string;
+  clock: string;
+  flash: string;
+  location: string;
+  version: string;
+  note: string;
+}
 
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("浏览器本地存储失败"));
+let activeWorkspaceId = "";
+
+export function configureWorkspace(workspaceId: string) {
+  activeWorkspaceId = workspaceId;
+}
+
+function workspaceId(): string {
+  if (!activeWorkspaceId) throw new Error("工作区尚未就绪");
+  return activeWorkspaceId;
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...init,
+    headers: init?.body instanceof FormData
+      ? init.headers
+      : { "Content-Type": "application/json", ...init?.headers },
   });
+  const data = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(data.error || "服务器请求失败");
+  return data as T;
 }
 
-function transactionDone(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("浏览器本地事务失败"));
-    transaction.onabort = () => reject(transaction.error ?? new Error("浏览器本地事务被中止"));
+export async function saveSession(session: DebugSessionRecord): Promise<void> {
+  await requestJson(`/api/sessions/${session.id}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...session, workspaceId: workspaceId() }),
   });
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains("sessions")) {
-        database.createObjectStore("sessions", { keyPath: "id" });
-      }
-      if (!database.objectStoreNames.contains("events")) {
-        const events = database.createObjectStore("events", { keyPath: "id" });
-        events.createIndex("by-session", "sessionId", { unique: false });
-      }
-      if (!database.objectStoreNames.contains("versions")) {
-        database.createObjectStore("versions", { keyPath: "id" });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("无法打开浏览器本地存储"));
-  });
-}
-
-async function putRecord(storeName: string, record: unknown): Promise<void> {
-  const database = await openDatabase();
-  const transaction = database.transaction(storeName, "readwrite");
-  transaction.objectStore(storeName).put(record);
-  await transactionDone(transaction);
-  database.close();
-}
-
-async function listRecords<T>(storeName: string): Promise<T[]> {
-  const database = await openDatabase();
-  const transaction = database.transaction(storeName, "readonly");
-  const records = await requestResult(transaction.objectStore(storeName).getAll());
-  await transactionDone(transaction);
-  database.close();
-  return records as T[];
-}
-
-export function saveSession(session: DebugSessionRecord): Promise<void> {
-  return putRecord("sessions", session);
 }
 
 export async function listSessions(): Promise<DebugSessionRecord[]> {
-  const sessions = await listRecords<DebugSessionRecord>("sessions");
-  return sessions.sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+  const result = await requestJson<{ sessions: DebugSessionRecord[] }>(
+    `/api/workspaces/${workspaceId()}/sessions`,
+  );
+  return result.sessions;
 }
 
-export function saveEvent(event: DebugEventRecord): Promise<void> {
-  return putRecord("events", event);
+export async function saveEvent(event: DebugEventRecord): Promise<void> {
+  await requestJson(`/api/sessions/${event.sessionId}/events`, {
+    method: "POST",
+    body: JSON.stringify(event),
+  });
 }
 
 export async function listEvents(sessionId: string): Promise<DebugEventRecord[]> {
-  const database = await openDatabase();
-  const transaction = database.transaction("events", "readonly");
-  const index = transaction.objectStore("events").index("by-session");
-  const events = await requestResult(index.getAll(IDBKeyRange.only(sessionId)));
-  await transactionDone(transaction);
-  database.close();
-  return (events as DebugEventRecord[]).sort((left, right) => left.sequence - right.sequence);
+  const result = await requestJson<{ events: DebugEventRecord[] }>(`/api/sessions/${sessionId}/events`);
+  return result.events;
 }
 
-export function saveFirmwareVersion(version: FirmwareVersionRecord): Promise<void> {
-  return putRecord("versions", version);
+export async function saveFirmwareVersion(version: FirmwareVersionRecord): Promise<FirmwareVersionRecord> {
+  if (!version.blob) throw new Error("固件内容不可用");
+  const form = new FormData();
+  form.set("file", version.blob, version.fileName);
+  form.set("sha256", version.sha256);
+  form.set("fileType", version.fileType);
+  const result = await requestJson<{ firmware: FirmwareVersionRecord }>(
+    `/api/workspaces/${workspaceId()}/firmware`,
+    { method: "POST", body: form },
+  );
+  return result.firmware;
 }
 
 export async function listFirmwareVersions(): Promise<FirmwareVersionRecord[]> {
-  const versions = await listRecords<FirmwareVersionRecord>("versions");
-  return versions.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const result = await requestJson<{ firmware: FirmwareVersionRecord[] }>(
+    `/api/workspaces/${workspaceId()}/firmware`,
+  );
+  return result.firmware;
+}
+
+export async function listDevices(): Promise<DeviceRecord[]> {
+  const result = await requestJson<{ devices: DeviceRecord[] }>(
+    `/api/workspaces/${workspaceId()}/devices`,
+  );
+  return result.devices;
+}
+
+export async function createDevice(
+  device: Omit<DeviceRecord, "id" | "workspaceId">,
+): Promise<DeviceRecord> {
+  const result = await requestJson<{ device: DeviceRecord }>(
+    `/api/workspaces/${workspaceId()}/devices`,
+    { method: "POST", body: JSON.stringify(device) },
+  );
+  return result.device;
 }

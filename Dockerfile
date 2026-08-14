@@ -3,15 +3,24 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
+COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.server.json vite.config.ts ./
 COPY src ./src
+COPY server ./server
 RUN npm run build
 
-FROM nginx:1.27-alpine AS runtime
+FROM node:22-alpine AS runtime
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist-server ./dist-server
+COPY deploy ./deploy
+RUN chmod +x /app/deploy/database-migrate
 
-EXPOSE 80
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
+CMD ["node", "dist-server/index.js"]

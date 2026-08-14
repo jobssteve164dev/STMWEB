@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   ListRestart,
   Loader2,
+  LogOut,
   MemoryStick,
   Pause,
   Play,
@@ -32,6 +33,7 @@ import {
   Usb,
   Wifi,
   X,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -44,6 +46,8 @@ import {
 } from "react";
 import {
   listEvents,
+  listDevices,
+  createDevice,
   listFirmwareVersions,
   listSessions,
   saveEvent,
@@ -52,6 +56,7 @@ import {
   type DebugEventRecord,
   type DebugSessionRecord,
   type FirmwareVersionRecord,
+  type DeviceRecord,
 } from "./db.js";
 import {
   inspectHardwareCapabilities,
@@ -62,20 +67,6 @@ import {
 } from "./hardware.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions";
-
-interface DeviceLedgerItem {
-  id: string;
-  projectId: string;
-  projectName: string;
-  name: string;
-  model: string;
-  board: string;
-  clock: string;
-  flash: string;
-  location: string;
-  version: string;
-  note: string;
-}
 
 interface ConnectionInfo {
   name: string;
@@ -96,6 +87,12 @@ interface MetricCardProps {
   icon: LucideIcon;
 }
 
+interface AppProps {
+  workspace: { id: string; name: string; slug: string; role: string };
+  user: { id: string; email: string; name: string };
+  onSignOut: () => void;
+}
+
 const navigation: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
   { id: "console", label: "调试台", icon: LayoutDashboard },
   { id: "devices", label: "设备台账", icon: Cpu },
@@ -103,34 +100,18 @@ const navigation: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
   { id: "sessions", label: "会话记录", icon: History },
 ];
 
-const demoDevices: DeviceLedgerItem[] = [
-  {
-    id: "environment-a07",
-    projectId: "air-quality-node",
-    projectName: "空气质量节点",
-    name: "环境监测主控 A-07",
-    model: "STM32H743VIT6",
-    board: "环境传感器主板 R3",
-    clock: "400 MHz",
-    flash: "2048 KB",
-    location: "工作台 01",
-    version: "v0.8.4",
-    note: "演示台账",
-  },
-  {
-    id: "gateway-b02",
-    projectId: "edge-gateway",
-    projectName: "边缘网关",
-    name: "边缘网关 B-02",
-    model: "STM32F407VGT6",
-    board: "网关控制板 R2",
-    clock: "168 MHz",
-    flash: "1024 KB",
-    location: "设备柜 B",
-    version: "v1.2.1",
-    note: "演示台账",
-  },
-];
+const emptyDevice: DeviceRecord = {
+  id: "unregistered",
+  workspaceId: "",
+  name: "未登记设备",
+  model: "待填写",
+  board: "待填写",
+  clock: "—",
+  flash: "—",
+  location: "未指定位置",
+  version: "未关联",
+  note: "",
+};
 
 const exampleFirmware = {
   id: "example-v084",
@@ -201,9 +182,12 @@ function EmptyState({ icon: Icon, title, body, action }: {
   );
 }
 
-function App() {
+function App({ workspace, user, onSignOut }: AppProps) {
   const [activeView, setActiveView] = useState<ViewId>("console");
-  const [selectedDeviceId, setSelectedDeviceId] = useState(demoDevices[0].id);
+  const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [deviceDialogOpen, setDeviceDialogOpen] = useState(false);
+  const [deviceBusy, setDeviceBusy] = useState(false);
   const [capabilities, setCapabilities] = useState<HardwareCapability[]>([]);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [selectedCapability, setSelectedCapability] = useState<HardwareCapabilityId | null>(null);
@@ -226,7 +210,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedDevice = demoDevices.find((device) => device.id === selectedDeviceId) ?? demoDevices[0];
+  const selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? emptyDevice;
   const activeCapability = capabilities.find((item) => item.id === selectedCapability);
 
   const combinedFirmware = useMemo(
@@ -245,25 +229,54 @@ function App() {
     let active = true;
     void Promise.all([
       inspectHardwareCapabilities(),
+      listDevices(),
       listSessions(),
       listFirmwareVersions(),
     ])
-      .then(([hardwareCapabilities, savedSessions, savedVersions]) => {
+      .then(([hardwareCapabilities, savedDevices, savedSessions, savedVersions]) => {
         if (!active) return;
         setCapabilities(hardwareCapabilities);
+        setDevices(savedDevices);
+        setSelectedDeviceId((current) => current || savedDevices[0]?.id || "");
         setSessions(savedSessions);
         setFirmwareVersions(savedVersions);
       })
       .catch(() => {
         if (!active) return;
         setStorageHealthy(false);
-        setToast({ tone: "warning", message: "浏览器本地记录不可用，本次数据不会持久保存" });
+        setToast({ tone: "warning", message: "工作区数据暂时无法加载，请检查网络后重试" });
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspace.id]);
+
+  async function submitDevice(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDeviceBusy(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      const device = await createDevice({
+        name: String(form.get("name") || ""),
+        model: String(form.get("model") || ""),
+        board: String(form.get("board") || ""),
+        clock: String(form.get("clock") || ""),
+        flash: String(form.get("flash") || ""),
+        location: String(form.get("location") || ""),
+        version: String(form.get("version") || ""),
+        note: String(form.get("note") || ""),
+      });
+      setDevices((current) => [device, ...current]);
+      setSelectedDeviceId(device.id);
+      setDeviceDialogOpen(false);
+      setToast({ tone: "success", message: `${device.name} 已加入设备台账` });
+    } catch (reason) {
+      setToast({ tone: "warning", message: reason instanceof Error ? reason.message : "设备保存失败" });
+    } finally {
+      setDeviceBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!toast) return;
@@ -299,7 +312,7 @@ function App() {
 
   function handleStorageError() {
     setStorageHealthy(false);
-    setToast({ tone: "warning", message: "本地记录写入失败，请检查浏览器存储权限" });
+    setToast({ tone: "warning", message: "调试记录尚未保存，请检查网络后重试" });
   }
 
   function appendEvent(
@@ -335,8 +348,7 @@ function App() {
     const isDemo = options.isDemo ?? connectionInfo?.isDemo ?? false;
     const session: DebugSessionRecord = {
       id: crypto.randomUUID(),
-      projectId: selectedDevice.projectId,
-      deviceId: selectedDevice.id,
+      projectId: workspace.id,
       deviceName: selectedDevice.name,
       connectionLabel: options.label ?? connectionInfo?.name ?? "浏览器设备",
       startedAt: new Date().toISOString(),
@@ -379,7 +391,7 @@ function App() {
       demoIntervalRef.current = null;
     }
     if (!currentSessionRef.current) return;
-    appendEvent("info", "记录已停止，数据已写入浏览器本地台账");
+    appendEvent("info", "记录已停止，数据已写入工作区台账");
     const completed: DebugSessionRecord = {
       ...currentSessionRef.current,
       endedAt: new Date().toISOString(),
@@ -450,7 +462,7 @@ function App() {
       const sha256 = await hashFile(file);
       const version: FirmwareVersionRecord = {
         id: crypto.randomUUID(),
-        projectId: "air-quality-node",
+        projectId: workspace.id,
         fileName: file.name,
         fileSize: file.size,
         fileType: file.name.split(".").pop()?.toUpperCase() || file.type || "FILE",
@@ -458,8 +470,8 @@ function App() {
         createdAt: new Date().toISOString(),
         blob: file,
       };
-      await saveFirmwareVersion(version);
-      setFirmwareVersions((current) => [version, ...current]);
+      const savedVersion = await saveFirmwareVersion(version);
+      setFirmwareVersions((current) => [savedVersion, ...current.filter((item) => item.id !== savedVersion.id)]);
       setToast({ tone: "success", message: `${file.name} 已校验并保存` });
     } catch {
       setToast({ tone: "warning", message: "固件文件保存失败，请检查浏览器存储空间" });
@@ -493,7 +505,7 @@ function App() {
     : "";
 
   const currentTemperature = telemetry.at(-1);
-  const storageLabel = storageHealthy ? "浏览器本地" : "暂不可用";
+  const storageLabel = storageHealthy ? "工作区数据库" : "暂不可用";
 
   return (
     <div className="app-shell">
@@ -510,7 +522,7 @@ function App() {
 
         <div className="workspace-select" aria-label="当前工作区">
           <span className="workspace-avatar">H</span>
-          <span><small>当前工作区</small><strong>硬件实验室</strong></span>
+          <span><small>当前工作区</small><strong>{workspace.name}</strong></span>
         </div>
 
         <nav className="main-nav">
@@ -537,7 +549,7 @@ function App() {
           <div className="section-heading compact">
             <span>最近设备</span>
           </div>
-          {demoDevices.map((device) => (
+          {devices.map((device) => (
             <button
               className={device.id === selectedDevice.id ? "device-mini selected" : "device-mini"}
               type="button"
@@ -564,11 +576,14 @@ function App() {
       <div className="workspace">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>硬件实验室</span><span>/</span><strong>{selectedDevice.projectName}</strong>
+            <span>{workspace.name}</span><span>/</span><strong>{selectedDevice.name}</strong>
           </div>
           <div className="topbar-status">
-            <span className="environment-badge"><span />本地实验</span>
-            <span className="account-mark">SZ</span>
+            <span className="environment-badge"><span />数据已同步</span>
+            <button className="account-button" type="button" onClick={onSignOut} title={`${user.name} · 退出登录`}>
+              <span className="account-mark">{user.name.slice(0, 2).toUpperCase()}</span>
+              <LogOut size={16} />
+            </button>
           </div>
         </header>
 
@@ -615,8 +630,8 @@ function App() {
               </section>
 
               <section className="metrics-grid" aria-label="设备摘要">
-                <MetricCard label="当前固件" value={selectedDevice.version} note="演示版本" icon={FileCode2} />
-                <MetricCard label="已存会话" value={String(sessions.length)} note="保存在此浏览器" icon={Database} />
+                <MetricCard label="当前固件" value={selectedDevice.version || "未关联"} note="设备台账" icon={FileCode2} />
+                <MetricCard label="已存会话" value={String(sessions.length)} note="工作区数据库" icon={Database} />
                 <MetricCard label="连接方式" value={connectionInfo ? connectionInfo.kind.toUpperCase() : "—"} note={connectionInfo ? connectionInfo.name : "尚未选择"} icon={Cable} />
                 <MetricCard label="实时温度" value={currentTemperature ? `${currentTemperature.toFixed(1)}°C` : "—"} note={currentSession?.isDemo ? "演示遥测" : "等待数据"} icon={Gauge} />
               </section>
@@ -733,19 +748,19 @@ function App() {
 
           {activeView === "devices" ? (
             <section className="page-section" aria-labelledby="devices-heading">
-              <div className="page-heading"><div><span className="panel-kicker">设备台账</span><h1 id="devices-heading">实体设备</h1><p>每台硬件保留稳定身份、固件版本和调试历史。</p></div><button className="primary-button" type="button" onClick={() => setConnectionDialogOpen(true)}><Plug size={17} />连接新设备</button></div>
-              <div className="table-panel">
+              <div className="page-heading"><div><span className="panel-kicker">设备台账</span><h1 id="devices-heading">实体设备</h1><p>每台硬件保留稳定身份、固件版本和调试历史。</p></div><button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />登记设备</button></div>
+              {devices.length === 0 ? <EmptyState icon={Cpu} title="还没有设备" body="先登记一台 STM32 设备，再开始连接和记录调试数据。" action={<button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />登记第一台设备</button>} /> : <div className="table-panel">
                 <table>
                   <thead><tr><th>设备</th><th>主控</th><th>板卡</th><th>位置</th><th>当前固件</th><th>状态</th></tr></thead>
-                  <tbody>{demoDevices.map((device) => <tr key={device.id}><td><strong>{device.name}</strong><small>{device.note}</small></td><td>{device.model}</td><td>{device.board}</td><td>{device.location}</td><td><span className="version-chip">{device.version}</span></td><td><span className={device.id === selectedDevice.id && connectionInfo ? "state-pill online" : "state-pill"}><span />{device.id === selectedDevice.id && connectionInfo ? "已连接" : "离线"}</span></td></tr>)}</tbody>
+                  <tbody>{devices.map((device) => <tr key={device.id} onClick={() => setSelectedDeviceId(device.id)}><td><strong>{device.name}</strong><small>{device.note || "—"}</small></td><td>{device.model || "—"}</td><td>{device.board || "—"}</td><td>{device.location || "—"}</td><td><span className="version-chip">{device.version || "未关联"}</span></td><td><span className={device.id === selectedDevice.id && connectionInfo ? "state-pill online" : "state-pill"}><span />{device.id === selectedDevice.id && connectionInfo ? "已连接" : "离线"}</span></td></tr>)}</tbody>
                 </table>
-              </div>
+              </div>}
             </section>
           ) : null}
 
           {activeView === "firmware" ? (
             <section className="page-section" aria-labelledby="firmware-heading">
-              <div className="page-heading"><div><span className="panel-kicker">版本化管理</span><h1 id="firmware-heading">固件制品</h1><p>导入文件后计算 SHA-256，并完整保存在此浏览器。</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? "正在校验" : "导入固件"}</button></div>
+              <div className="page-heading"><div><span className="panel-kicker">版本化管理</span><h1 id="firmware-heading">固件制品</h1><p>导入文件后计算 SHA-256，并完整保存到工作区数据库。</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? "正在校验" : "导入固件"}</button></div>
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
               <div className="artifact-grid">
                 {combinedFirmware.map((version) => (
@@ -793,6 +808,25 @@ function App() {
             ) : null}
             <div className="dialog-footer"><div>{activeCapability ? <><CircleAlert size={16} /><span>{activeCapability.id === "network" ? "首次访问局域网时，浏览器会请求网络权限。" : "下一步将打开浏览器的系统设备选择器。"}</span></> : <span>选择一种方式继续</span>}</div><button className="primary-button" type="button" disabled={!selectedCapability || Boolean(connecting)} onClick={() => selectedCapability && void connectHardware(selectedCapability)}>{connecting ? <Loader2 size={17} className="spinning" /> : <Plug size={17} />}{connecting ? "正在连接" : "继续连接"}</button></div>
           </section>
+        </div>
+      ) : null}
+
+      {deviceDialogOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deviceBusy) setDeviceDialogOpen(false); }}>
+          <form className="connection-dialog device-form" role="dialog" aria-modal="true" aria-labelledby="device-form-title" onSubmit={(event) => void submitDevice(event)}>
+            <div className="dialog-heading"><div><span className="panel-kicker">设备台账</span><h2 id="device-form-title">登记设备</h2><p>填写能帮助你识别和定位这台硬件的信息。</p></div><button type="button" aria-label="关闭" disabled={deviceBusy} onClick={() => setDeviceDialogOpen(false)}><X size={20} /></button></div>
+            <div className="device-form-grid">
+              <label><span>设备名称</span><input name="name" required maxLength={160} placeholder="例如：环境监测主控 A-07" /></label>
+              <label><span>MCU 型号</span><input name="model" maxLength={120} placeholder="STM32H743VIT6" /></label>
+              <label><span>板卡</span><input name="board" maxLength={120} placeholder="环境传感器主板 R3" /></label>
+              <label><span>位置</span><input name="location" maxLength={160} placeholder="工作台 01" /></label>
+              <label><span>时钟</span><input name="clock" maxLength={80} placeholder="400 MHz" /></label>
+              <label><span>Flash</span><input name="flash" maxLength={80} placeholder="2048 KB" /></label>
+              <label><span>当前固件</span><input name="version" maxLength={120} placeholder="v0.8.4" /></label>
+              <label><span>备注</span><input name="note" maxLength={1000} placeholder="用途或硬件状态" /></label>
+            </div>
+            <div className="dialog-footer"><span>保存后可直接选择此设备开始调试。</span><button className="primary-button" type="submit" disabled={deviceBusy}>{deviceBusy ? <Loader2 size={17} className="spinning" /> : <Plus size={17} />}{deviceBusy ? "正在保存" : "保存设备"}</button></div>
+          </form>
         </div>
       ) : null}
 

@@ -72,6 +72,7 @@ import {
   type DeviceCapabilityManifest,
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
+import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions";
 
@@ -158,6 +159,13 @@ const emptyTelemetrySnapshot: TelemetrySnapshot = {
   voltage: 0,
   lineOffset: 0,
   lineAngle: 0,
+  balanceKp: 0,
+  balanceKi: 0,
+  balanceKd: 0,
+  velocityKp: 0,
+  velocityKi: 0,
+  velocityKd: 0,
+  averagePwm: 0,
 };
 
 function formatBytes(bytes: number): string {
@@ -240,6 +248,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
   const demoIntervalRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
+  const dotTelemetryCarryRef = useRef("");
 
   const selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? emptyDevice;
   const activeCapability = capabilities.find((item) => item.id === selectedCapability);
@@ -440,6 +449,13 @@ function App({ workspace, user, onSignOut }: AppProps) {
           voltage,
           lineOffset: Math.sin(tick / 2.5) * 14,
           lineAngle: Math.cos(tick / 3.5) * 9,
+          balanceKp: 120,
+          balanceKi: 0,
+          balanceKd: 0.3,
+          velocityKp: 120,
+          velocityKi: 0.6,
+          velocityKd: 0,
+          averagePwm: (leftSpeed + rightSpeed) / 2,
         });
         appendEvent("data", `TEMP=${temperature.toFixed(2)}°C  VBUS=${voltage.toFixed(3)}V  RSSI=${signal}dBm`, {
           temperature: Number(temperature.toFixed(2)),
@@ -511,6 +527,16 @@ function App({ workspace, user, onSignOut }: AppProps) {
             });
             return;
           }
+          const dotTelemetry = parseDotTelemetryChunk(dotTelemetryCarryRef.current, text);
+          dotTelemetryCarryRef.current = dotTelemetry.carry;
+          if (dotTelemetry.measurements.length > 0) {
+            setDeviceManifest((current) => current ?? dotCapabilityManifest);
+            setTelemetrySnapshot((current) => {
+              const next = { ...current };
+              for (const measurement of dotTelemetry.measurements) next[measurement.channel] = measurement.value;
+              return next;
+            });
+          }
           appendEvent("data", text.trim() || "收到串口数据");
         },
       });
@@ -521,7 +547,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
         kind: connection.kind,
         isDemo: false,
       });
-      if (kind !== "serial") setDeviceManifest(null);
+      if (kind !== "serial" && kind !== "bluetooth") setDeviceManifest(null);
       setConnectionDialogOpen(false);
       setSelectedCapability(null);
       setToast({ tone: "success", message: `${connection.name} 已连接` });
@@ -543,6 +569,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
     setDeviceManifest(null);
     setSelectedComponents([]);
     setTelemetry([]);
+    dotTelemetryCarryRef.current = "";
     setLogs([]);
     setToast({ tone: "info", message: "设备连接已断开" });
   }

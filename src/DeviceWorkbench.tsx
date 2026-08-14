@@ -32,6 +32,13 @@ interface TelemetrySnapshot {
   voltage: number;
   lineOffset: number;
   lineAngle: number;
+  balanceKp: number;
+  balanceKi: number;
+  balanceKd: number;
+  velocityKp: number;
+  velocityKi: number;
+  velocityKd: number;
+  averagePwm: number;
 }
 
 interface DeviceWorkbenchProps {
@@ -72,6 +79,7 @@ function availableTypes(manifest: DeviceCapabilityManifest): DeviceCapabilityTyp
 export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChange }: DeviceWorkbenchProps) {
   const [pickerOpen, setPickerOpen] = useState(true);
   const available = availableTypes(manifest);
+  const hasAveragePwm = manifest.capabilities.some((capability) => capability.type === "motor" && capability.channels.includes("averagePwm"));
 
   function toggle(type: DeviceCapabilityType) {
     onChange(selected.includes(type) ? selected.filter((item) => item !== type) : [...selected, type]);
@@ -135,12 +143,12 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChang
 
           {selected.includes("motor") ? (
             <article className="workbench-card motor-widget">
-              <div className="widget-heading"><div><Gauge size={18} /><strong>电机与编码器</strong></div><span>独立通道</span></div>
-              <div className="motor-pair">
+              <div className="widget-heading"><div><Gauge size={18} /><strong>电机输出</strong></div><span>{hasAveragePwm ? "左右平均" : "独立通道"}</span></div>
+              {hasAveragePwm ? <div className="motor-pair"><div className="motor-channel"><span className={telemetry.averagePwm >= 0 ? "motor-ring forward" : "motor-ring reverse"}><i /></span><strong>平均 PWM</strong><b>{Math.abs(telemetry.averagePwm).toFixed(0)}</b><span>{telemetry.averagePwm >= 0 ? "正向" : "反向"}输出</span></div></div> : <div className="motor-pair">
                 {[{ name: "左电机", speed: telemetry.leftSpeed, pwm: telemetry.leftPwm }, { name: "右电机", speed: telemetry.rightSpeed, pwm: telemetry.rightPwm }].map((motor) => (
                   <div className="motor-channel" key={motor.name}><span className={motor.speed >= 0 ? "motor-ring forward" : "motor-ring reverse"}><i /></span><strong>{motor.name}</strong><b>{Math.abs(motor.speed).toFixed(0)} <small>rpm</small></b><span>{motor.speed >= 0 ? "正转" : "反转"} · PWM {Math.abs(motor.pwm).toFixed(0)}%</span></div>
                 ))}
-              </div>
+              </div>}
             </article>
           ) : null}
 
@@ -154,7 +162,7 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChang
           {selected.includes("controls") ? (
             <article className="workbench-card controls-widget">
               <div className="widget-heading"><div><SlidersHorizontal size={18} /><strong>参数与控制</strong></div><span>设备范围保护</span></div>
-              <div className="parameter-list"><label><span>平衡 Kp</span><input type="range" min="0" max="200" defaultValue="120" disabled={!isDemo} /><output>120</output></label><label><span>速度 Kp</span><input type="range" min="0" max="200" defaultValue="120" disabled={!isDemo} /><output>120</output></label></div>
+              <div className="parameter-list"><label><span>平衡 Kp</span><input type="range" min="0" max="200" value={telemetry.balanceKp} readOnly disabled={!isDemo} /><output>{telemetry.balanceKp.toFixed(1)}</output></label><label><span>平衡 Ki</span><input type="range" min="0" max="10" step="0.1" value={telemetry.balanceKi} readOnly disabled={!isDemo} /><output>{telemetry.balanceKi.toFixed(3)}</output></label><label><span>平衡 Kd</span><input type="range" min="0" max="10" step="0.1" value={telemetry.balanceKd} readOnly disabled={!isDemo} /><output>{telemetry.balanceKd.toFixed(3)}</output></label><label><span>速度 Kp</span><input type="range" min="0" max="200" value={telemetry.velocityKp} readOnly disabled={!isDemo} /><output>{telemetry.velocityKp.toFixed(1)}</output></label><label><span>速度 Ki</span><input type="range" min="0" max="10" step="0.1" value={telemetry.velocityKi} readOnly disabled={!isDemo} /><output>{telemetry.velocityKi.toFixed(3)}</output></label><label><span>速度 Kd</span><input type="range" min="0" max="10" step="0.1" value={telemetry.velocityKd} readOnly disabled={!isDemo} /><output>{telemetry.velocityKd.toFixed(3)}</output></label></div>
             </article>
           ) : null}
 

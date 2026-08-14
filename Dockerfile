@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -8,7 +8,7 @@ COPY src ./src
 COPY server ./server
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM --platform=$TARGETPLATFORM node:22-alpine AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app

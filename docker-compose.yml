@@ -1,6 +1,15 @@
+x-gitops:
+  public_entry:
+    service: web
+    container_port: 8080
+    healthcheck:
+      path: /health
+      expected_json:
+        status: ok
+
 services:
   web:
-    platform: linux/arm64
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile

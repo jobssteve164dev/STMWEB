@@ -1,0 +1,9 @@
+node_modules/
+dist/
+output/playwright/
+.solopreneur/
+AGENTS.md
+agent.md
+PROJECT_MEMORY.md
+*.log
+.DS_Store

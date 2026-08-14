@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/walker/Downloads/DOT平衡小车/4.源代码与原理图/DOT-V1.0/标准版源代码/V1.0/DOT_COER",
+      "program": "/Users/walker/Downloads/DOT平衡小车/4.源代码与原理图/DOT-V1.0/标准版源代码/V1.0/DOT_COER/build/Debug/outDebug"
+    }
+  ]
+}

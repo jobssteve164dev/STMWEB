@@ -36,8 +36,8 @@ jobs:
           file: runner/image/Dockerfile
           platforms: linux/amd64
           load: true
-          provenance: mode=max
-          sbom: true
+          provenance: false
+          sbom: false
           tags: stmweb/compiler:${{ inputs.version }}
       - name: Export immutable environment
         env:

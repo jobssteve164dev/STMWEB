@@ -13,6 +13,7 @@ const [workflow, release, installer, runner, dockerfile, schema] = await Promise
 
 JSON.parse(schema);
 assert.match(workflow, /platforms: linux\/amd64/);
+assert.match(workflow, /load: true[\s\S]*provenance: false[\s\S]*sbom: false/);
 assert.match(workflow, /build-compiler-environment-release\.sh/);
 assert.match(release, /docker save/);
 assert.match(release, /imageId/);

@@ -7,7 +7,8 @@ import path from "node:path";
 
 const VERSION = "0.1.0";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
-const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "ghcr.io/jobssteve164dev/stmweb-build-arm-gcc:v1";
+const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.1.0";
+const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1"]);
 const allowedTargets = new Set(["stm32f103c8", "stm32f103cb"]);
 
@@ -18,6 +19,10 @@ function value(args, flag, fallback) {
 
 function sha256(data) {
   return createHash("sha256").update(data).digest("hex");
+}
+
+function shellQuote(value) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 async function loadState(stateDir) {
@@ -53,12 +58,18 @@ function capabilities() {
   return {
     os: process.platform,
     architecture: process.arch,
-    backend: docker.status === 0 ? "docker" : "unavailable",
+    backend: docker.status === 0 && imageReady() ? "docker" : "unavailable",
     environmentVersion: BUILD_IMAGE,
     maxConcurrentBuilds: 1,
     diskFreeMb,
     toolchains: [{ id: "arm-none-eabi-gcc", version: "container-pinned", targets: [...allowedTargets] }],
   };
+}
+
+function imageReady() {
+  if (!EXPECTED_IMAGE_ID) return false;
+  const image = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", BUILD_IMAGE], { encoding: "utf8", timeout: 10_000 });
+  return image.status === 0 && image.stdout.trim() === EXPECTED_IMAGE_ID;
 }
 
 async function register(args) {
@@ -129,14 +140,30 @@ async function execute(stateDir, state, job) {
     const unpack = spawnSync("unzip", ["-q", archive, "-d", source], { encoding: "utf8", timeout: 30_000 });
     if (unpack.status !== 0) throw new Error("源码包无法解压");
     const cmake = path.join(source, "CMakeLists.txt");
-    await stat(cmake).catch(() => { throw new Error("源码包根目录缺少 CMakeLists.txt"); });
+    let cmakeSource = "/source";
+    let sourceOptions = "";
+    const hasCmake = await stat(cmake).then(() => true).catch(() => false);
+    if (!hasCmake) {
+      const project = spawnSync("find", [source, "-type", "f", "-path", "*/USER/DOT.uvprojx", "-print", "-quit"], { encoding: "utf8", timeout: 10_000 }).stdout.trim();
+      if (!project) throw new Error("无法识别源码工程；请上传 CMake 工程或受支持的 Keil 工程");
+      const projectRoot = path.dirname(path.dirname(project));
+      const projectDefinition = await readFile(project, "utf8");
+      if (!projectDefinition.includes("<Device>STM32F103CB</Device>") || !projectDefinition.includes("..\\DOT\\CONTROL\\control.c")) {
+        throw new Error("Keil 工程与 DOT V1 适配器不匹配");
+      }
+      const relativeRoot = path.relative(source, projectRoot);
+      if (relativeRoot.startsWith("..")) throw new Error("源码工程路径无效");
+      cmakeSource = "/opt/stmweb/adapters/dot-v1";
+      sourceOptions = ` -DSTMWEB_SOURCE_ROOT=${shellQuote(`/source/${relativeRoot.replaceAll("\\", "/")}`)}`;
+    }
+    if (!imageReady()) throw new Error("编译环境尚未由 GitOps Agent 正确安装或内容校验失败");
     await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "accepted", "Runner 已接收并校验源码"), event(job.id, "started", "开始编译")]);
     const args = [
       "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "1g", "--pids-limit", "256",
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
       BUILD_IMAGE, "sh", "-lc",
-      `cmake -S /source -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} && cmake --build /output/build --parallel 1`,
+      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target}${sourceOptions} && cmake --build /output/build --parallel 1`,
     ];
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     const log = [];

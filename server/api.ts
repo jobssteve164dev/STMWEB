@@ -321,6 +321,10 @@ router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (reques
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
+  if (!env.STMWEB_BUILD_IMAGE_ID) {
+    response.status(409).json({ error: "编译环境尚未通过 GitOps Agent 发布到节点" });
+    return;
+  }
   const code = randomBytes(12).toString("base64url").toUpperCase().replace(/[-_]/g, "").slice(0, 12);
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
   await pool.query(
@@ -331,7 +335,7 @@ router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (reques
   response.status(201).json({
     code,
     expiresAt: expiresAt.toISOString(),
-    command: `curl -fsSL ${shellArgument(`${origin}/install-runner.sh`)} | sudo bash -s -- --url ${shellArgument(origin)} --code ${shellArgument(code)} --image ${shellArgument(env.STMWEB_BUILD_IMAGE)}`,
+    command: `curl -fsSL ${shellArgument(`${origin}/install-runner.sh`)} | sudo bash -s -- --url ${shellArgument(origin)} --code ${shellArgument(code)} --image ${shellArgument(env.STMWEB_BUILD_IMAGE)} --image-id ${shellArgument(env.STMWEB_BUILD_IMAGE_ID)}`,
   });
 }));
 

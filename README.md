@@ -37,7 +37,7 @@ npm audit --audit-level=high
 
 生产构建输出到 `dist/` 和 `dist-server/`，由 Node.js 服务统一提供页面、鉴权与 API。
 
-编译 Runner 不需要平台登录 Homelab，也不需要开放节点入站端口。管理员在“编译与烧录”中生成命令并在 x86 Linux 节点执行；生产环境的 `STMWEB_BUILD_IMAGE` 应填写由 `Compiler image` 工作流发布后得到的 GHCR digest 引用。
+编译 Runner 不需要平台登录 Homelab，也不需要开放节点入站端口。管理员在“编译与烧录”中生成命令并在 x86 Linux 节点执行。国内节点不在任务中直拉国外镜像：`Compiler image` 工作流生成带 SHA-256 和 image ID 的 amd64 产物，由 GitOps Agent 产物代理安装到节点；平台回填 `STMWEB_BUILD_IMAGE` 和 `STMWEB_BUILD_IMAGE_ID` 后才允许生成配对命令。
 
 ## 当前边界
 

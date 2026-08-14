@@ -12,6 +12,7 @@ export interface HardwareConnection {
   kind: HardwareCapabilityId;
   name: string;
   detail: string;
+  write?: (data: Uint8Array | string) => Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -54,9 +55,27 @@ interface BluetoothDeviceLike {
   id: string;
   gatt?: {
     connected: boolean;
-    connect(): Promise<{ connected: boolean; disconnect(): void }>;
+    connect(): Promise<BluetoothServerLike>;
     disconnect(): void;
   };
+}
+
+interface BluetoothCharacteristicLike extends EventTarget {
+  value?: DataView;
+  startNotifications(): Promise<BluetoothCharacteristicLike>;
+  stopNotifications?(): Promise<BluetoothCharacteristicLike>;
+  writeValue?(value: BufferSource): Promise<void>;
+  writeValueWithoutResponse?(value: BufferSource): Promise<void>;
+}
+
+interface BluetoothServiceLike {
+  getCharacteristic(characteristic: string | number): Promise<BluetoothCharacteristicLike>;
+}
+
+interface BluetoothServerLike {
+  connected: boolean;
+  disconnect(): void;
+  getPrimaryService(service: string | number): Promise<BluetoothServiceLike>;
 }
 
 interface HardwareNavigator extends Navigator {
@@ -70,9 +89,18 @@ interface HardwareNavigator extends Navigator {
     requestDevice(options: { filters: Array<Record<string, number>> }): Promise<HidDeviceLike[]>;
   };
   bluetooth?: {
-    requestDevice(options: { acceptAllDevices: boolean }): Promise<BluetoothDeviceLike>;
+    requestDevice(options: {
+      acceptAllDevices: boolean;
+      optionalServices: Array<string | number>;
+    }): Promise<BluetoothDeviceLike>;
   };
 }
+
+const ECB02_GATT = {
+  service: 0xfff0,
+  notify: 0xfff1,
+  write: 0xfff2,
+} as const;
 
 const capabilityDefinitions: Array<Omit<HardwareCapability, "supported" | "permission">> = [
   {
@@ -234,17 +262,65 @@ export async function requestHardwareConnection(
 
   if (kind === "bluetooth") {
     if (!hardwareNavigator.bluetooth) throw new Error("当前浏览器不支持蓝牙访问");
-    const device = await hardwareNavigator.bluetooth.requestDevice({ acceptAllDevices: true });
-    const server = device.gatt ? await device.gatt.connect() : undefined;
-    return {
-      kind,
-      name: device.name || "BLE 设备",
-      detail: server?.connected ? "GATT 已连接" : `设备标识 ${device.id}`,
-      close: async () => {
-        server?.disconnect();
-        device.gatt?.disconnect();
-      },
-    };
+    const device = await hardwareNavigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [ECB02_GATT.service],
+    });
+    if (!device.gatt) throw new Error("所选设备没有可用的 BLE GATT 服务");
+
+    let server: BluetoothServerLike | undefined;
+    let notifyCharacteristic: BluetoothCharacteristicLike | undefined;
+    let handleNotification: ((event: Event) => void) | undefined;
+    try {
+      server = await device.gatt.connect();
+      const service = await server.getPrimaryService(ECB02_GATT.service);
+      notifyCharacteristic = await service.getCharacteristic(ECB02_GATT.notify);
+      const writeCharacteristic = await service.getCharacteristic(ECB02_GATT.write);
+
+      handleNotification = (event: Event) => {
+        const value = (event.target as BluetoothCharacteristicLike | null)?.value;
+        if (!value || !options.onSerialText) return;
+        const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        options.onSerialText(new TextDecoder().decode(bytes));
+      };
+      notifyCharacteristic.addEventListener("characteristicvaluechanged", handleNotification);
+      await notifyCharacteristic.startNotifications();
+
+      return {
+        kind,
+        name: device.name || "ECB02 蓝牙设备",
+        detail: "蓝牙数据通道已连接",
+        write: async (data) => {
+          const bytes = typeof data === "string"
+            ? new TextEncoder().encode(data)
+            : Uint8Array.from(data);
+          if (writeCharacteristic.writeValueWithoutResponse) {
+            await writeCharacteristic.writeValueWithoutResponse(bytes);
+            return;
+          }
+          if (writeCharacteristic.writeValue) {
+            await writeCharacteristic.writeValue(bytes);
+            return;
+          }
+          throw new Error("小车蓝牙写入通道不可用");
+        },
+        close: async () => {
+          if (handleNotification) {
+            notifyCharacteristic?.removeEventListener("characteristicvaluechanged", handleNotification);
+          }
+          await notifyCharacteristic?.stopNotifications?.().catch(() => undefined);
+          server?.disconnect();
+          device.gatt?.disconnect();
+        },
+      };
+    } catch (error) {
+      server?.disconnect();
+      device.gatt.disconnect();
+      if (error instanceof DOMException && error.name === "NotFoundError") {
+        throw new Error("所选设备没有 ECB02 默认蓝牙通道，请确认小车蓝牙已开启且模块 UUID 为 FFF0/FFF1/FFF2");
+      }
+      throw error;
+    }
   }
 
   const urlText = options.networkUrl?.trim();

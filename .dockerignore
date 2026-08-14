@@ -1,0 +1,13 @@
+.git
+.github
+.solopreneur
+node_modules
+dist
+output
+.env
+.env.*
+*.log
+AGENTS.md
+agent.md
+PROJECT_MEMORY.md
+README.md

@@ -1,6 +1,9 @@
 node_modules/
 dist/
 output/playwright/
+.env
+.env.*
+!.env.example
 .solopreneur/
 AGENTS.md
 agent.md

@@ -38,6 +38,30 @@ function bearerCredential(request: Request): string | null {
   return credential.startsWith("stmweb_api_") ? credential : null;
 }
 
+export async function resolveApiConnectionCredential(credential: string): Promise<{
+  user: InternalUser;
+  connection: ApiConnectionIdentity;
+} | null> {
+  if (!credential.startsWith("stmweb_api_")) return null;
+  const digest = digestCredential(credential);
+  const result = await pool.query<InternalUser & { connectionId: string; workspaceId: string; scopes: ApiScope[]; credentialHash: string }>(
+    `UPDATE api_connections c SET last_used_at=now()
+     FROM internal_users u
+     WHERE c.credential_hash=$1 AND c.user_id=u.id AND c.status='active'
+       AND c.revoked_at IS NULL AND u.enabled=true
+     RETURNING u.id, u.username, u.display_name AS name, u.email,
+       u.passport_user_id AS "passportUserId", c.id AS "connectionId",
+       c.workspace_id AS "workspaceId", c.scopes, c.credential_hash AS "credentialHash"`,
+    [digest],
+  );
+  const identity = result.rows[0];
+  if (!identity || !timingSafeEqual(Buffer.from(identity.credentialHash), Buffer.from(digest))) return null;
+  return {
+    user: identity,
+    connection: { id: identity.connectionId, workspaceId: identity.workspaceId, scopes: identity.scopes },
+  };
+}
+
 export function requiredApiScope(method: string, path: string): ApiScope | null {
   if (/\/devices$/.test(path)) return method === "GET" ? "devices:read" : "devices:control";
   if (/\/firmware$/.test(path)) return method === "GET" ? "artifacts:read" : "builds:create";
@@ -61,30 +85,19 @@ export async function requireUserOrApiConnection(request: Request, response: Res
       (request as AuthenticatedApiRequest).currentUser = user;
       return next();
     }
-    const digest = digestCredential(credential);
-    const result = await pool.query<InternalUser & { connectionId: string; workspaceId: string; scopes: ApiScope[]; credentialHash: string }>(
-      `UPDATE api_connections c SET last_used_at=now()
-       FROM internal_users u
-       WHERE c.credential_hash=$1 AND c.user_id=u.id AND c.status='active'
-         AND c.revoked_at IS NULL AND u.enabled=true
-       RETURNING u.id, u.username, u.display_name AS name, u.email,
-         u.passport_user_id AS "passportUserId", c.id AS "connectionId",
-         c.workspace_id AS "workspaceId", c.scopes, c.credential_hash AS "credentialHash"`,
-      [digest],
-    );
-    const identity = result.rows[0];
-    if (!identity || !timingSafeEqual(Buffer.from(identity.credentialHash), Buffer.from(digest))) {
+    const identity = await resolveApiConnectionCredential(credential);
+    if (!identity) {
       return response.status(401).json({ error: "API 凭证无效或已撤销" });
     }
     const apiRequest = request as AuthenticatedApiRequest;
-    apiRequest.currentUser = identity;
-    apiRequest.apiConnection = { id: identity.connectionId, workspaceId: identity.workspaceId, scopes: identity.scopes };
+    apiRequest.currentUser = identity.user;
+    apiRequest.apiConnection = identity.connection;
     response.on("finish", () => {
       const action = `${request.method} ${request.baseUrl}${request.path}`.slice(0, 200);
       void pool.query(
         `INSERT INTO api_audit_events (connection_id, workspace_id, action, outcome)
          VALUES ($1,$2,$3,$4)`,
-        [identity.connectionId, identity.workspaceId, action, response.statusCode < 400 ? "succeeded" : "failed"],
+        [identity.connection.id, identity.connection.workspaceId, action, response.statusCode < 400 ? "succeeded" : "failed"],
       ).catch(() => undefined);
     });
     return next();

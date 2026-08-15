@@ -1,8 +1,9 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { pool } from "./database.js";
 import { env } from "./env.js";
+import { resolveApiConnectionCredential, type ApiScope } from "./api-connection-auth.js";
 import { digestRunnerSecret } from "./runner-auth.js";
 
 const router = express.Router();
@@ -61,38 +62,41 @@ export const STMWEB_CLOUDMCP_TOOLS = [
   },
 ] as const;
 
-type Operator = { userId: string; workspaceId: string };
+type Operator = { userId: string; workspaceId: string; connectionId: string; scopes: ApiScope[] };
 
-function safeEqual(actual: string, expected: string): boolean {
-  const left = Buffer.from(actual);
-  const right = Buffer.from(expected);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
+const TOOL_SCOPES: Record<string, ApiScope[]> = {
+  list_tools: [],
+  list_stmweb_debug_state: ["devices:read", "runners:read", "builds:read", "debug:read"],
+  create_stmweb_runner_pairing: ["runners:manage"],
+  start_stmweb_firmware_build: ["builds:create"],
+  get_stmweb_firmware_build: ["builds:read"],
+  cancel_stmweb_firmware_build: ["builds:cancel"],
+  get_stmweb_debug_session: ["debug:read"],
+};
 
-function authenticate(request: Request): void {
-  const clientId = env.CLOUDMCP_BRIDGE_CLIENT_ID;
-  const secrets = [env.CLOUDMCP_BRIDGE_CLIENT_SECRET, env.CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT].filter((value): value is string => Boolean(value));
-  if (!clientId || secrets.length === 0) throw Object.assign(new Error("CloudMCP provider bridge is not configured"), { status: 503 });
-  const declaredClient = request.get("X-CloudMCP-Bridge-Client") || "";
+async function operator(request: Request, tool: string): Promise<Operator> {
   const authorization = request.get("Authorization") || "";
-  if (!safeEqual(declaredClient, clientId) || !secrets.some((secret) => safeEqual(authorization, `Bearer ${secret}`))) {
-    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  if (!authorization.startsWith("Bearer ")) throw Object.assign(new Error("API 连接凭证缺失"), { status: 401 });
+  const resolved = await resolveApiConnectionCredential(authorization.slice(7).trim());
+  if (!resolved) throw Object.assign(new Error("API 连接凭证无效或已撤销"), { status: 401 });
+  const required = TOOL_SCOPES[tool];
+  if (!required) throw Object.assign(new Error(`Unknown tool: ${tool}`), { status: 404 });
+  if (required.some((scope) => !resolved.connection.scopes.includes(scope))) {
+    throw Object.assign(new Error("这个 API 连接没有执行该动作的权限"), { status: 403 });
   }
+  return {
+    userId: resolved.user.id,
+    workspaceId: resolved.connection.workspaceId,
+    connectionId: resolved.connection.id,
+    scopes: resolved.connection.scopes,
+  };
 }
 
-async function operator(): Promise<Operator> {
-  if (!env.STMWEB_ADMIN_USERNAME) throw Object.assign(new Error("旧 CloudMCP Provider Bridge 已进入迁移状态"), { status: 503 });
-  const result = await pool.query<Operator>(
-    `SELECT u.id AS "userId", w.id AS "workspaceId"
-     FROM internal_users u
-     JOIN workspace_members wm ON wm.user_id=u.id AND wm.role IN ('owner','editor')
-     JOIN workspaces w ON w.id=wm.workspace_id
-     WHERE u.username=$1 AND u.enabled=true
-     ORDER BY w.created_at ASC LIMIT 1`,
-    [env.STMWEB_ADMIN_USERNAME.toLowerCase()],
+async function recordApiActivity(identity: Operator, tool: string, outcome: "succeeded" | "failed"): Promise<void> {
+  await pool.query(
+    `INSERT INTO api_audit_events (connection_id,workspace_id,action,outcome) VALUES ($1,$2,$3,$4)`,
+    [identity.connectionId, identity.workspaceId, tool, outcome],
   );
-  if (!result.rows[0]) throw Object.assign(new Error("CloudMCP 操作员还没有可写工作区"), { status: 409 });
-  return result.rows[0];
 }
 
 function allowedRepositories(): Set<string> {
@@ -185,7 +189,7 @@ router.get(["/help", "/v1/help"], (_request, response) => {
   response.json({
     object: "stmweb_provider_bridge_help",
     provider: { bridgeId: "stmweb_hardware", providerId: "stmweb_hardware", providerName: "STMWEB Hardware", routePath: "/api/provider-bridge" },
-    auth: { mode: "cloudmcp_provider_env_v1" },
+    auth: { mode: "user_api_bearer_v1" },
     protocol: { requestShape: { tool: "string", params: {} }, successShape: { success: true, result: "any" }, failureShape: { success: false, error: "string" } },
     tools: STMWEB_CLOUDMCP_TOOLS,
     boundaries: { browserHardwareRequired: true, remoteFlashAvailable: false },
@@ -193,10 +197,12 @@ router.get(["/help", "/v1/help"], (_request, response) => {
 });
 
 router.post("/", express.json({ limit: "64kb" }), async (request, response) => {
+  let identity: Operator | null = null;
+  let tool = "unknown";
   try {
-    authenticate(request);
     const body = z.object({ tool: z.string().min(1), params: z.record(z.string(), z.unknown()).default({}) }).parse(request.body);
-    const identity = await operator();
+    tool = body.tool;
+    identity = await operator(request, tool);
     let result: unknown;
     if (body.tool === "list_tools") result = STMWEB_CLOUDMCP_TOOLS;
     else if (body.tool === "list_stmweb_debug_state") result = await listState(identity);
@@ -206,9 +212,11 @@ router.post("/", express.json({ limit: "64kb" }), async (request, response) => {
     else if (body.tool === "cancel_stmweb_firmware_build") result = await cancelBuild(identity, body.params);
     else if (body.tool === "get_stmweb_debug_session") result = await getDebugSession(identity, body.params);
     else throw Object.assign(new Error(`Unknown tool: ${body.tool}`), { status: 404 });
+    await recordApiActivity(identity, tool, "succeeded");
     response.json({ success: true, result });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : (typeof error === "object" && error && "status" in error ? Number(error.status) : 500);
+    if (identity) await recordApiActivity(identity, tool, "failed").catch(() => undefined);
     response.status(status).json({ success: false, error: status === 500 ? "STMWEB provider bridge 暂时不可用" : (error as Error).message });
   }
 });

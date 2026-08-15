@@ -74,10 +74,11 @@ function imageReady() {
 
 async function register(args) {
   const controlUrl = value(args, "--url");
-  const code = value(args, "--code");
+  const codeFile = value(args, "--code-file");
+  const code = codeFile ? (await readFile(codeFile, "utf8")).trim() : value(args, "--code");
   const stateDir = value(args, "--state-dir", DEFAULT_STATE_DIR);
   const name = value(args, "--name", hostname());
-  if (!controlUrl || !code) throw new Error("register 需要 --url 和 --code");
+  if (!controlUrl || !code) throw new Error("register 需要 --url 和配对凭证");
   const current = await loadState(stateDir);
   if (current.deviceToken) throw new Error("这台节点已经注册；转移工作区前请先正式解绑");
   const response = await request({ controlUrl }, "/api/runner/pair", {

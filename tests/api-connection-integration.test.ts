@@ -13,6 +13,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
   const { pool } = await import("../server/database.js");
   const { migrateDatabase } = await import("../server/migrate.js");
   const { apiRouter } = await import("../server/api.js");
+  const { cloudmcpProviderRouter } = await import("../server/cloudmcp-provider.js");
   await migrateDatabase();
 
   const suffix = randomBytes(6).toString("hex");
@@ -38,11 +39,13 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
 
   const app = express();
   app.use("/api/v1", apiRouter);
+  app.use("/api/provider-bridge", cloudmcpProviderRouter);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}/api/v1`;
+  const providerBase = `http://127.0.0.1:${address.port}/api/provider-bridge`;
   const headers = { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" };
 
   try {
@@ -57,8 +60,25 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     })).status, 403);
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[1].id}/devices`, { headers })).status, 403);
 
+    const providerTools = await fetch(providerBase, {
+      method: "POST", headers, body: JSON.stringify({ tool: "list_tools", params: {} }),
+    });
+    assert.equal(providerTools.status, 200);
+    const providerToolBody = await providerTools.json() as { result: Array<{ name: string }> };
+    assert.equal(providerToolBody.result.some((item) => item.name === "create_stmweb_runner_pairing"), true);
+    assert.equal((await fetch(providerBase, {
+      method: "POST", headers, body: JSON.stringify({ tool: "list_stmweb_debug_state", params: {} }),
+    })).status, 403);
+    assert.equal((await fetch(providerBase, {
+      method: "POST", headers: { Authorization: "Bearer legacy-provider-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({ tool: "list_tools", params: {} }),
+    })).status, 401);
+
     await pool.query(`UPDATE api_connections SET status='revoked',revoked_at=now() WHERE id=$1`, [connection.rows[0].id]);
     assert.equal((await fetch(`${base}/bootstrap`, { headers })).status, 401);
+    assert.equal((await fetch(providerBase, {
+      method: "POST", headers, body: JSON.stringify({ tool: "list_tools", params: {} }),
+    })).status, 401);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await pool.query(`DELETE FROM workspaces WHERE id = ANY($1::uuid[])`, [workspaces.rows.map((item) => item.id)]);

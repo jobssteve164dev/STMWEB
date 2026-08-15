@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, runner, dockerfile, schema] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, runner, dockerfile, schema] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
+  read("runner/install-runner-package.sh"),
+  read("scripts/build-firmware-compilation-release.sh"),
+  read("scripts/verify-firmware-compilation-release.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
   read("contracts/compiler-environment.schema.json"),
@@ -22,7 +25,14 @@ assert.match(installer, /BUILD_IMAGE_ID/);
 assert.doesNotMatch(installer, /command -v node/);
 assert.match(installer, /--entrypoint node/);
 assert.match(installer, /\/var\/run\/docker\.sock/);
+assert.match(packageBuilder, /export-classic-docker-archive\.sh/);
+assert.match(packageBuilder, /stmweb-firmware-compilation-linux-amd64/);
+assert.match(packageVerifier, /package member set is invalid/);
+assert.match(packageInstaller, /--code-file \/run\/stmweb-pairing-code/);
+assert.doesNotMatch(packageInstaller, /--code \"\$PAIRING_CODE\"/);
+assert.match(packageInstaller, /GITOPS_STMWEB_FIRMWARE_COMPILATION_READY=1/);
 assert.match(runner, /imageReady\(\)/);
+assert.match(runner, /--code-file/);
 assert.match(runner, /\/opt\/stmweb\/adapters\/dot-v1/);
 assert.match(dockerfile, /COPY firmware-adapters\/dot-v1/);
 assert.match(dockerfile, /FROM node:22-bookworm-slim/);

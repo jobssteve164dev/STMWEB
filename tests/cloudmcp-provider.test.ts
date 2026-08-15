@@ -30,7 +30,11 @@ test("CloudMCP provider exposes only implemented STMWEB operations", () => {
 
 test("CloudMCP provider deployment uses the public environment contract", () => {
   const compose = readFileSync("docker-compose.yml", "utf8");
+  const provider = readFileSync("server/cloudmcp-provider.ts", "utf8");
   assert.match(compose, /CLOUDMCP_BRIDGE_CLIENT_ID:/);
   assert.match(compose, /CLOUDMCP_BRIDGE_CLIENT_SECRET:/);
   assert.doesNotMatch(compose, /STMWEB_CLOUDMCP_BRIDGE_CLIENT/);
+  assert.match(provider, /resolveApiConnectionCredential/);
+  assert.match(provider, /user_api_bearer_v1/);
+  assert.doesNotMatch(provider, /STMWEB_ADMIN_USERNAME|CLOUDMCP_BRIDGE_CLIENT_SECRET/);
 });

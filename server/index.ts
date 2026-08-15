@@ -9,6 +9,7 @@ import { env } from "./env.js";
 import { migrateDatabase } from "./migrate.js";
 import { runnerApiRouter } from "./runner-api.js";
 import { billingApiRouter } from "./billing-api.js";
+import { apiConnectionsRouter } from "./api-connection-auth.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -33,6 +34,8 @@ app.use("/api/internal-auth", internalAuthRouter);
 app.use("/api/billing", billingApiRouter);
 app.use("/api/provider-bridge", cloudmcpProviderRouter);
 app.use("/api/runner", runnerApiRouter);
+app.use("/api/api-connections", apiConnectionsRouter);
+app.use("/api/v1", apiRouter);
 app.use("/api", apiRouter);
 app.use(express.static(path.join(root, "dist"), { index: false, maxAge: "7d", immutable: true }));
 app.get("*", (_request, response) => response.sendFile(path.join(root, "dist", "index.html")));

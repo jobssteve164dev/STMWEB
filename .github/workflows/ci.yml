@@ -8,6 +8,25 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stmweb_test
+          POSTGRES_PASSWORD: stmweb_test
+          POSTGRES_DB: stmweb_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stmweb_test -d stmweb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://stmweb_test:stmweb_test@127.0.0.1:5432/stmweb_test
+      TEST_DATABASE_URL: postgresql://stmweb_test:stmweb_test@127.0.0.1:5432/stmweb_test
+      BETTER_AUTH_SECRET: ci-test-secret-that-is-at-least-32-characters
+      BETTER_AUTH_URL: http://127.0.0.1:8080
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
@@ -15,4 +34,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run check

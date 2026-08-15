@@ -114,6 +114,37 @@ CREATE TABLE IF NOT EXISTS debug_events (
 
 CREATE INDEX IF NOT EXISTS events_session_idx ON debug_events(session_id, sequence);
 
+CREATE TABLE IF NOT EXISTS api_connections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES internal_users(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name text NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  purpose text NOT NULL CHECK (length(purpose) BETWEEN 1 AND 500),
+  scopes text[] NOT NULL,
+  credential_hash text NOT NULL UNIQUE CHECK (length(credential_hash) = 64),
+  credential_hint text NOT NULL CHECK (length(credential_hint) = 6),
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  rotated_at timestamptz,
+  last_used_at timestamptz,
+  revoked_at timestamptz,
+  CHECK (cardinality(scopes) > 0),
+  CHECK (scopes <@ ARRAY['devices:read','devices:control','debug:read','debug:execute','runners:read','runners:manage','builds:read','builds:create','builds:cancel','artifacts:read']::text[])
+);
+
+CREATE INDEX IF NOT EXISTS api_connections_user_idx ON api_connections(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS api_audit_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  connection_id uuid NOT NULL REFERENCES api_connections(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  action text NOT NULL CHECK (length(action) BETWEEN 1 AND 200),
+  outcome text NOT NULL CHECK (outcome IN ('succeeded','failed')),
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS api_audit_events_connection_idx ON api_audit_events(connection_id, occurred_at DESC);
+
 CREATE TABLE IF NOT EXISTS workbench_preferences (
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   profile_key text NOT NULL,

@@ -22,6 +22,7 @@ import {
   Plug,
   Radio,
   RefreshCw,
+  Settings,
   ShieldCheck,
   Square,
   SquareTerminal,
@@ -73,8 +74,9 @@ import {
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
+import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
 
-type ViewId = "console" | "devices" | "firmware" | "sessions";
+type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
 
 interface ConnectionInfo {
   name: string;
@@ -97,7 +99,7 @@ interface MetricCardProps {
 
 interface AppProps {
   workspace: { id: string; name: string; slug: string; role: string };
-  user: { id: string; username: string; name: string };
+  user: { id: string; username: string; name: string; email?: string };
   onSignOut: () => void;
 }
 
@@ -106,6 +108,7 @@ const navigation: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
   { id: "devices", label: "设备台账", icon: Cpu },
   { id: "firmware", label: "固件版本", icon: Box },
   { id: "sessions", label: "会话记录", icon: History },
+  { id: "settings", label: "设置", icon: Settings },
 ];
 
 const emptyDevice: DeviceRecord = {
@@ -849,6 +852,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
               )}
             </section>
           ) : null}
+          {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} /> : null}
         </main>
       </div>
 

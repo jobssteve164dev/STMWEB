@@ -5,8 +5,8 @@ import multer from "multer";
 import { z } from "zod";
 import { pool, withTransaction } from "./database.js";
 import { env } from "./env.js";
-import { requireInternalSession } from "./internal-auth.js";
 import { digestRunnerSecret } from "./runner-auth.js";
+import { requireConnectionScope, requireConnectionWorkspace, requireUserOrApiConnection, type AuthenticatedApiRequest } from "./api-connection-auth.js";
 
 interface AuthenticatedRequest extends Request {
   currentUser: { id: string; username: string; name: string };
@@ -58,16 +58,6 @@ function shellArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function verifyOrigin(request: Request, response: Response, next: NextFunction) {
-  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
-  const origin = request.get("origin");
-  if (origin !== new URL(env.BETTER_AUTH_URL).origin) {
-    response.status(403).json({ error: "请求来源未获授权" });
-    return;
-  }
-  next();
-}
-
 async function requireWorkspace(
   userId: string,
   workspaceId: string,
@@ -85,8 +75,8 @@ async function requireWorkspace(
   }
 }
 
-router.use(verifyOrigin);
-router.use(requireInternalSession);
+router.use(requireUserOrApiConnection);
+router.use(requireConnectionScope);
 router.use(express.json({ limit: "1mb" }));
 
 router.get("/me", (request, response) => {
@@ -95,16 +85,17 @@ router.get("/me", (request, response) => {
 
 router.get("/bootstrap", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
+  const apiConnection = (request as AuthenticatedApiRequest).apiConnection;
   const result = await withTransaction(async (client) => {
     let workspaces = await client.query(
       `SELECT w.id, w.name, w.slug, wm.role
        FROM workspaces w
        JOIN workspace_members wm ON wm.workspace_id = w.id
-       WHERE wm.user_id = $1
+       WHERE wm.user_id = $1 AND ($2::uuid IS NULL OR w.id = $2)
        ORDER BY w.created_at ASC`,
-      [user.id],
+      [user.id, apiConnection?.workspaceId ?? null],
     );
-    if (workspaces.rowCount === 0) {
+    if (workspaces.rowCount === 0 && !apiConnection) {
       const created = await client.query<{ id: string }>(
         `INSERT INTO workspaces (name, slug, owner_user_id)
          VALUES ($1, $2, $3) RETURNING id`,
@@ -129,6 +120,7 @@ router.get("/bootstrap", asyncRoute(async (request, response) => {
 router.get("/workspaces/:workspaceId/devices", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id, workspace_id AS "workspaceId", name, model, board, clock, flash, location,
@@ -142,6 +134,7 @@ router.get("/workspaces/:workspaceId/devices", asyncRoute(async (request, respon
 router.post("/workspaces/:workspaceId/devices", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
   const input = z.object({
     name: z.string().trim().min(1).max(160),
@@ -166,6 +159,7 @@ router.post("/workspaces/:workspaceId/devices", asyncRoute(async (request, respo
 router.get("/workspaces/:workspaceId/firmware", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id, workspace_id AS "workspaceId", file_name AS "fileName", file_size::bigint::text AS "fileSize",
@@ -179,6 +173,7 @@ router.get("/workspaces/:workspaceId/firmware", asyncRoute(async (request, respo
 router.post("/workspaces/:workspaceId/firmware", upload.single("file"), asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
   if (!request.file) {
     response.status(400).json({ error: "请选择固件文件" });
@@ -201,6 +196,7 @@ router.post("/workspaces/:workspaceId/firmware", upload.single("file"), asyncRou
 router.get("/workspaces/:workspaceId/sessions", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id, workspace_id AS "projectId", device_id AS "deviceId", device_name AS "deviceName",
@@ -215,6 +211,7 @@ router.get("/workspaces/:workspaceId/sessions", asyncRoute(async (request, respo
 router.put("/sessions/:sessionId", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const input = sessionSchema.parse({ ...request.body, id: request.params.sessionId });
+  requireConnectionWorkspace(request, input.workspaceId);
   await requireWorkspace(user.id, input.workspaceId, true);
   await pool.query(
     `INSERT INTO debug_sessions
@@ -239,6 +236,7 @@ router.get("/sessions/:sessionId/events", asyncRoute(async (request, response) =
     response.status(404).json({ error: "调试会话不存在" });
     return;
   }
+  requireConnectionWorkspace(request, access.rows[0].workspace_id);
   await requireWorkspace(user.id, access.rows[0].workspace_id);
   const result = await pool.query(
     `SELECT id, session_id AS "sessionId", sequence, recorded_at AS "recordedAt", level, message, payload
@@ -258,6 +256,7 @@ router.post("/sessions/:sessionId/events", asyncRoute(async (request, response) 
     response.status(404).json({ error: "调试会话不存在" });
     return;
   }
+  requireConnectionWorkspace(request, access.rows[0].workspace_id);
   await requireWorkspace(user.id, access.rows[0].workspace_id, true);
   await withTransaction(async (client) => {
     await client.query(
@@ -277,6 +276,7 @@ router.post("/sessions/:sessionId/events", asyncRoute(async (request, response) 
 router.get("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   const key = profileKey.parse(request.params.profileKey);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query<{ selectedComponents: string[] }>(
@@ -290,6 +290,7 @@ router.get("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (r
 router.put("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   const key = profileKey.parse(request.params.profileKey);
   const selectedComponents = z.array(workbenchComponent).max(20).parse(request.body.selectedComponents);
   await requireWorkspace(user.id, workspaceId, true);
@@ -306,6 +307,7 @@ router.put("/workspaces/:workspaceId/workbench/:profileKey", asyncRoute(async (r
 router.get("/workspaces/:workspaceId/runners", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id,name,capabilities,
@@ -320,9 +322,10 @@ router.get("/workspaces/:workspaceId/runners", asyncRoute(async (request, respon
 router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
   if (!env.STMWEB_BUILD_IMAGE_ID) {
-    response.status(409).json({ error: "编译环境尚未通过 GitOps Agent 发布到节点" });
+    response.status(409).json({ error: "编译环境尚未发布到节点" });
     return;
   }
   const code = randomBytes(12).toString("base64url").toUpperCase().replace(/[-_]/g, "").slice(0, 12);
@@ -342,6 +345,7 @@ router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (reques
 router.get("/workspaces/:workspaceId/builds", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT j.id,j.runner_id AS "runnerId",r.name AS "runnerName",j.name,j.profile,j.target,j.source_name AS "sourceName",
@@ -356,6 +360,7 @@ router.get("/workspaces/:workspaceId/builds", asyncRoute(async (request, respons
 router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
   if (!request.file) { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
   const input = z.object({
@@ -381,6 +386,7 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
 router.post("/workspaces/:workspaceId/builds/:jobId/cancel", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   const jobId = uuid.parse(request.params.jobId);
   await requireWorkspace(user.id, workspaceId, true);
   const result = await pool.query(
@@ -396,6 +402,7 @@ router.post("/workspaces/:workspaceId/builds/:jobId/cancel", asyncRoute(async (r
 router.get("/workspaces/:workspaceId/builds/:jobId/events", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   const jobId = uuid.parse(request.params.jobId);
   await requireWorkspace(user.id, workspaceId);
   const access = await pool.query(`SELECT id FROM build_jobs WHERE id=$1 AND workspace_id=$2`,[jobId,workspaceId]);
@@ -407,6 +414,7 @@ router.get("/workspaces/:workspaceId/builds/:jobId/events", asyncRoute(async (re
 router.get("/workspaces/:workspaceId/builds/:jobId/artifacts/:artifactId", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);
+  requireConnectionWorkspace(request, workspaceId);
   const jobId = uuid.parse(request.params.jobId);
   const artifactId = uuid.parse(request.params.artifactId);
   await requireWorkspace(user.id, workspaceId);

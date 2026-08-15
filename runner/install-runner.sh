@@ -19,11 +19,13 @@ done
 [[ "$BUILD_IMAGE" =~ ^[a-zA-Z0-9./:_@-]+$ ]] || { echo "编译镜像引用格式无效" >&2; exit 2; }
 [[ "$BUILD_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "编译镜像摘要格式无效" >&2; exit 2; }
 [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] || { echo "第一版 Runner 需要 Linux x86_64" >&2; exit 1; }
-command -v node >/dev/null && [[ "$(node -p 'Number(process.versions.node.split(`.`)[0])')" -ge 22 ]] || { echo "需要 Node.js 22 或更新版本" >&2; exit 1; }
 command -v docker >/dev/null || { echo "需要可用的 Docker" >&2; exit 1; }
-command -v unzip >/dev/null || { echo "需要 unzip" >&2; exit 1; }
 ACTUAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$BUILD_IMAGE" 2>/dev/null || true)"
 [[ "$ACTUAL_IMAGE_ID" == "$BUILD_IMAGE_ID" ]] || { echo "请先通过 GitOps Agent 产物代理安装已批准的编译环境" >&2; exit 1; }
+docker run --rm --entrypoint node "$BUILD_IMAGE" -e 'process.exit(Number(process.versions.node.split(`.`)[0]) >= 22 ? 0 : 1)' \
+  || { echo "编译环境缺少 Node.js 22" >&2; exit 1; }
+docker run --rm --entrypoint unzip "$BUILD_IMAGE" -v >/dev/null \
+  || { echo "编译环境缺少 unzip" >&2; exit 1; }
 
 INSTALL_ROOT="/opt/stmweb-runner"
 STATE_ROOT="/var/lib/stmweb-runner"
@@ -32,7 +34,12 @@ install -d -m 0700 "$STATE_ROOT"
 curl -fL --retry 3 "$CONTROL_URL/runner/stmweb-runner.mjs" -o "$INSTALL_ROOT/stmweb-runner.mjs.download"
 mv "$INSTALL_ROOT/stmweb-runner.mjs.download" "$INSTALL_ROOT/stmweb-runner.mjs"
 chmod 0755 "$INSTALL_ROOT/stmweb-runner.mjs"
-node "$INSTALL_ROOT/stmweb-runner.mjs" register --url "$CONTROL_URL" --code "$PAIRING_CODE" --state-dir "$STATE_ROOT"
+docker run --rm \
+  --entrypoint node \
+  -v "$INSTALL_ROOT:$INSTALL_ROOT:ro" \
+  -v "$STATE_ROOT:$STATE_ROOT" \
+  "$BUILD_IMAGE" \
+  "$INSTALL_ROOT/stmweb-runner.mjs" register --url "$CONTROL_URL" --code "$PAIRING_CODE" --state-dir "$STATE_ROOT"
 
 cat > /etc/systemd/system/stmweb-runner.service <<EOF
 [Unit]
@@ -45,7 +52,8 @@ Requires=docker.service
 Type=simple
 Environment="STMWEB_BUILD_IMAGE=$BUILD_IMAGE"
 Environment="STMWEB_BUILD_IMAGE_ID=$BUILD_IMAGE_ID"
-ExecStart=/usr/bin/node $INSTALL_ROOT/stmweb-runner.mjs connect --state-dir $STATE_ROOT
+ExecStart=/usr/bin/docker run --rm --name stmweb-runner-runtime --entrypoint node -e STMWEB_BUILD_IMAGE=$BUILD_IMAGE -e STMWEB_BUILD_IMAGE_ID=$BUILD_IMAGE_ID -v /var/run/docker.sock:/var/run/docker.sock -v $INSTALL_ROOT:$INSTALL_ROOT:ro -v $STATE_ROOT:$STATE_ROOT $BUILD_IMAGE $INSTALL_ROOT/stmweb-runner.mjs connect --state-dir $STATE_ROOT
+ExecStop=-/usr/bin/docker stop stmweb-runner-runtime
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

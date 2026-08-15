@@ -123,7 +123,7 @@ internalAuthRouter.post("/login", async (request, response, next) => {
     if (passport.needsEmailVerification) return response.status(409).json({ error: "请先完成邮箱验证，再回来登录" });
     const user = passport.user;
     const account = await upsertPassportUser(user);
-    await linkPassportIdentity(user);
+    await linkPassportIdentity(user, account.id);
     attempts.delete(key);
     const token = randomBytes(32).toString("base64url");
     await pool.query(
@@ -134,7 +134,12 @@ internalAuthRouter.post("/login", async (request, response, next) => {
     response.cookie(COOKIE_NAME, token, cookieOptions());
     return response.json({ user: account });
   } catch (error) {
-    console.error("[STMWEB] Passport login completion failed", error);
+    console.error("[STMWEB] Passport login completion failed", error instanceof PassportError ? {
+      code: error.code,
+      status: error.status,
+      requestId: typeof error.details?.requestId === "string" ? error.details.requestId : null,
+      stage: typeof error.details?.stage === "string" ? error.details.stage : null,
+    } : error);
     if (error instanceof PassportError) return response.status(503).json({ error: "账号登录没有完成，请稍后再试" });
     return next(error);
   }

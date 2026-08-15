@@ -5,6 +5,7 @@ export class PassportError extends Error {
     message: string,
     readonly status = 503,
     readonly code = "passport_unavailable",
+    readonly details: Record<string, unknown> | null = null,
   ) {
     super(message);
   }
@@ -37,6 +38,9 @@ async function passportRequest(path: string, init: { method?: string; body?: unk
       typeof remoteError?.message === "string" ? remoteError.message : "账号服务暂时不可用",
       response.status,
       typeof remoteError?.code === "string" ? remoteError.code : "passport_request_failed",
+      remoteError?.details && typeof remoteError.details === "object" && !Array.isArray(remoteError.details)
+        ? remoteError.details as Record<string, unknown>
+        : null,
     );
   }
   if (!value || value.ok !== true || !value.data || typeof value.data !== "object" || Array.isArray(value.data)) {
@@ -64,11 +68,11 @@ export async function loginWithPassport(email: string, password: string) {
   return { user: readUser(result), needsEmailVerification: result.needsEmailVerification === true };
 }
 
-export async function linkPassportIdentity(user: PassportUser) {
+export async function linkPassportIdentity(user: PassportUser, productUserId: string) {
   await passportRequest("passport/link", { method: "POST", body: {
     email: user.email,
     product: env.PASSPORT_PRODUCT,
-    productUid: user.id,
+    productUid: productUserId,
     metadata: { integration: "stmweb" },
   } });
 }

@@ -46,7 +46,7 @@ test("creates checkout only for a plan returned by the Passport catalog", async 
   );
 });
 
-test("links the authenticated Passport identity without substituting a local account id", async () => {
+test("links the final persisted local account id to the Passport identity", async () => {
   let requestBody: Record<string, unknown> | undefined;
   globalThis.fetch = async (_input, init) => {
     requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -56,11 +56,30 @@ test("links the authenticated Passport identity without substituting a local acc
     });
   };
   const { linkPassportIdentity } = await import("../server/passport.js");
-  await linkPassportIdentity({ id: "passport-user-1", email: "user@example.com", name: "用户" });
+  await linkPassportIdentity({ id: "passport-user-1", email: "user@example.com", name: "用户" }, "local-user-1");
   assert.deepEqual(requestBody, {
     email: "user@example.com",
     product: "stmweb",
-    productUid: "passport-user-1",
+    productUid: "local-user-1",
     metadata: { integration: "stmweb" },
   });
+});
+
+test("preserves Passport request id and failure stage for server-side diagnosis", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false,
+    error: {
+      code: "passport_link_failed",
+      message: "Failed to link product identity",
+      details: { requestId: "request-1", stage: "sync_entitlements" },
+    },
+  }), { status: 500, headers: { "Content-Type": "application/json" } });
+  const { linkPassportIdentity, PassportError } = await import("../server/passport.js");
+  await assert.rejects(
+    linkPassportIdentity({ id: "passport-user-1", email: "user@example.com", name: null }, "local-user-1"),
+    (error: unknown) => error instanceof PassportError
+      && error.code === "passport_link_failed"
+      && error.details?.requestId === "request-1"
+      && error.details?.stage === "sync_entitlements",
+  );
 });

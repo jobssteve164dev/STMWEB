@@ -4,6 +4,8 @@
 
 第一版近距离无线接入、固件能力识别、动态调试组件、在线构建与安全升级的正式边界见 [第一版近距离无线硬件调试设计](docs/v1-nearby-wireless-debugging.md)。
 
+STMWEB 用户 API、用户授权连接以及 GitOps、CloudMCP 和外部工具的统一客户端边界见 [STMWEB 用户 API 与客户端适配器架构](docs/user-api-and-client-adapters.md)。
+
 供受授权智能体使用的编译与调试记录能力见 [CloudMCP 硬件调试工具契约](docs/cloudmcp-tools.md)。
 
 ## 第一版能力

@@ -139,6 +139,7 @@ internalAuthRouter.post("/login", async (request, response, next) => {
       status: error.status,
       requestId: typeof error.details?.requestId === "string" ? error.details.requestId : null,
       stage: typeof error.details?.stage === "string" ? error.details.stage : null,
+      reason: typeof error.details?.reason === "string" ? error.details.reason : null,
     } : error);
     if (error instanceof PassportError) return response.status(503).json({ error: "账号登录没有完成，请稍后再试" });
     return next(error);

@@ -83,3 +83,19 @@ test("preserves Passport request id and failure stage for server-side diagnosis"
       && error.details?.stage === "sync_entitlements",
   );
 });
+
+test("retries one transient Passport network failure", async () => {
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new TypeError("fetch failed");
+    return new Response(JSON.stringify({
+      ok: true,
+      data: { user: { id: "passport-1", email: "user@example.com", name: null } },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const { loginWithPassport } = await import("../server/passport.js");
+  const result = await loginWithPassport("user@example.com", "password");
+  assert.equal(attempts, 2);
+  assert.equal(result.user.id, "passport-1");
+});

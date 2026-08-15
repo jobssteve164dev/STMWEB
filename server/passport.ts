@@ -21,16 +21,34 @@ function configuredSecret(): string {
 async function passportRequest(path: string, init: { method?: string; body?: unknown; query?: Record<string, string> } = {}) {
   const url = new URL(`/api/v1/${path}`, env.SZLK_PASSPORT_URL);
   for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value);
-  const response = await fetch(url, {
-    method: init.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-      "X-SZLK-Product": env.PASSPORT_PRODUCT,
-      "X-SZLK-Secret": configuredSecret(),
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    signal: AbortSignal.timeout(12_000),
-  }).catch(() => { throw new PassportError("账号服务暂时不可用"); });
+  let response: globalThis.Response | null = null;
+  let lastFailure: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        method: init.method ?? "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SZLK-Product": env.PASSPORT_PRODUCT,
+          "X-SZLK-Secret": configuredSecret(),
+        },
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        signal: AbortSignal.timeout(12_000),
+      });
+      break;
+    } catch (error) {
+      lastFailure = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  if (!response) {
+    const cause = lastFailure instanceof Error && lastFailure.cause && typeof lastFailure.cause === "object"
+      ? lastFailure.cause as { code?: unknown }
+      : null;
+    throw new PassportError("账号服务暂时不可用", 503, "passport_unavailable", {
+      reason: typeof cause?.code === "string" ? cause.code : lastFailure instanceof Error ? lastFailure.name : "unknown",
+    });
+  }
   const value = await response.json().catch(() => null) as Record<string, unknown> | null;
   if (!response.ok) {
     const remoteError = value?.error && typeof value.error === "object" ? value.error as Record<string, unknown> : null;

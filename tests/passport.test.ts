@@ -45,3 +45,22 @@ test("creates checkout only for a plan returned by the Passport catalog", async 
     /所选方案当前不可用/,
   );
 });
+
+test("links the authenticated Passport identity without substituting a local account id", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ ok: true, data: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const { linkPassportIdentity } = await import("../server/passport.js");
+  await linkPassportIdentity({ id: "passport-user-1", email: "user@example.com", name: "用户" });
+  assert.deepEqual(requestBody, {
+    email: "user@example.com",
+    product: "stmweb",
+    productUid: "passport-user-1",
+    metadata: { integration: "stmweb" },
+  });
+});

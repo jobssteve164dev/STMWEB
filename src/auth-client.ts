@@ -11,6 +11,10 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("登录服务返回了异常响应，请稍后再试");
+  }
   const body = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(body.error || "登录服务暂时不可用");
   return body;

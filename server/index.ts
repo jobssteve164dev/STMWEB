@@ -37,6 +37,10 @@ app.use("/api/runner", runnerApiRouter);
 app.use("/api/api-connections", apiConnectionsRouter);
 app.use("/api/v1", apiRouter);
 app.use("/api", apiRouter);
+app.use("/api", (error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  console.error("[STMWEB] API request failed", error);
+  response.status(500).json({ error: "请求没有完成，请稍后再试" });
+});
 app.use(express.static(path.join(root, "dist"), { index: false, maxAge: "7d", immutable: true }));
 app.get("*", (_request, response) => response.sendFile(path.join(root, "dist", "index.html")));
 

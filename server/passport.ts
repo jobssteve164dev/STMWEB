@@ -64,11 +64,11 @@ export async function loginWithPassport(email: string, password: string) {
   return { user: readUser(result), needsEmailVerification: result.needsEmailVerification === true };
 }
 
-export async function linkPassportIdentity(user: PassportUser, productUserId: string) {
+export async function linkPassportIdentity(user: PassportUser) {
   await passportRequest("passport/link", { method: "POST", body: {
     email: user.email,
     product: env.PASSPORT_PRODUCT,
-    productUid: productUserId,
+    productUid: user.id,
     metadata: { integration: "stmweb" },
   } });
 }

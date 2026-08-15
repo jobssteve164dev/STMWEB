@@ -6,7 +6,7 @@
 
 STMWEB 用户 API、用户授权连接以及 GitOps、CloudMCP 和外部工具的统一客户端边界见 [STMWEB 用户 API 与客户端适配器架构](docs/user-api-and-client-adapters.md)。
 
-供受授权智能体使用的编译与调试记录能力见 [CloudMCP 硬件调试工具契约](docs/cloudmcp-tools.md)。
+现有 CloudMCP 工具迁移到用户授权 API 的兼容基线见 [CloudMCP 硬件调试工具契约](docs/cloudmcp-tools.md)。
 
 ## 第一版能力
 
@@ -41,7 +41,7 @@ npm audit --audit-level=high
 
 生产构建输出到 `dist/` 和 `dist-server/`，由 Node.js 服务统一提供页面、鉴权与 API。
 
-编译 Runner 不需要平台登录 Homelab，也不需要开放节点入站端口。管理员在“编译与烧录”中生成命令并在 x86 Linux 节点执行。国内节点不在任务中直拉国外镜像：`Compiler image` 工作流生成带 SHA-256 和 image ID 的 amd64 产物，由 GitOps Agent 产物代理安装到节点；平台回填 `STMWEB_BUILD_IMAGE` 和 `STMWEB_BUILD_IMAGE_ID` 后才允许生成配对命令。
+编译 Runner 不需要 STMWEB 登录用户节点，也不需要开放节点入站端口。用户在“编译与烧录”中生成命令，并通过自己选择的脚本、CI、节点平台或人工方式在 x86 Linux 节点执行。节点必须预先安装与 `STMWEB_BUILD_IMAGE`、`STMWEB_BUILD_IMAGE_ID` 一致的编译镜像；当前用户可在自己的 GitOps 中使用普通 Runner Target 和产物代理完成安装，但这不是其他用户接入 STMWEB 的前提。
 
 ## 当前边界
 

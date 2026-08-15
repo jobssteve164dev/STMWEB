@@ -40,12 +40,12 @@ PY
 
 RUNTIME_ARCHIVE="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/stmweb-runtime.XXXXXX.tar.gz")"
 RUNNER_SCRIPT="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/stmweb-runner.XXXXXX.mjs")"
-trap 'unlink "$RUNTIME_ARCHIVE" "$RUNNER_SCRIPT"' EXIT
+trap 'unlink "$RUNTIME_ARCHIVE"; unlink "$RUNNER_SCRIPT"' EXIT
 tar -xOzf "$PACKAGE_PATH" runtime/image.tar.gz > "$RUNTIME_ARCHIVE"
 tar -xOzf "$PACKAGE_PATH" bin/stmweb-runner.mjs > "$RUNNER_SCRIPT"
-node "$RUNNER_SCRIPT" version >/dev/null
 docker load --input "$RUNTIME_ARCHIVE" >/dev/null
 [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" == "linux/amd64" ]] || { echo "runtime platform mismatch" >&2; exit 1; }
+docker run --rm -v "$RUNNER_SCRIPT:/tmp/stmweb-runner.mjs:ro" --entrypoint node "$IMAGE" /tmp/stmweb-runner.mjs version >/dev/null
 docker run --rm --entrypoint node "$IMAGE" -e 'process.exit(Number(process.versions.node.split(`.`)[0]) >= 22 ? 0 : 1)'
 docker run --rm --entrypoint arm-none-eabi-gcc "$IMAGE" --version >/dev/null
 printf 'verified_firmware_compilation_version=%s\nverified_source_revision=%s\nverified_package_sha256=%s\n' "$VERSION" "$SOURCE_REVISION" "$PACKAGE_SHA"

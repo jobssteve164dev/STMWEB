@@ -7,12 +7,20 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS internal_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   username text NOT NULL UNIQUE,
-  password_hash text NOT NULL,
+  password_hash text,
+  passport_user_id text,
+  email text,
   display_name text NOT NULL,
   enabled boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE internal_users ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE internal_users ADD COLUMN IF NOT EXISTS passport_user_id text;
+ALTER TABLE internal_users ADD COLUMN IF NOT EXISTS email text;
+CREATE UNIQUE INDEX IF NOT EXISTS internal_users_passport_user_idx
+  ON internal_users(passport_user_id) WHERE passport_user_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS internal_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

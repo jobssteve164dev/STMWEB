@@ -2,6 +2,7 @@ export interface AuthUser {
   id: string;
   username: string;
   name: string;
+  email: string;
 }
 
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -19,10 +20,10 @@ export function getSession() {
   return authRequest<{ user: AuthUser | null }>("session");
 }
 
-export function signIn(username: string, password: string) {
+export function signIn(email: string, password: string) {
   return authRequest<{ user: AuthUser }>("login", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
 }
 

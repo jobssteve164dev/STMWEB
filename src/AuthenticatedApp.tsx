@@ -19,7 +19,7 @@ function LoginScreen({ message }: { message?: string }) {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      await signIn(String(data.get("username") || ""), String(data.get("password") || ""));
+      await signIn(String(data.get("email") || ""), String(data.get("password") || ""));
       window.location.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "登录失败");
@@ -32,20 +32,20 @@ function LoginScreen({ message }: { message?: string }) {
       <section className="login-card" aria-labelledby="login-title">
         <div className="login-brand"><span><ShieldCheck size={24} /></span><strong>STMWEB</strong></div>
         <div className="login-copy">
-          <span className="login-kicker"><LockKeyhole size={14} />内部调试工作台</span>
+          <span className="login-kicker"><LockKeyhole size={14} />硬件调试工作台</span>
           <h1 id="login-title">登录后继续调试</h1>
-          <p>使用管理员为你配置的内部账号进入。设备、固件和调试记录会保存到你的工作区。</p>
+          <p>使用 SZLKPassport 账号进入。设备、固件和调试记录会安全地保存在你的工作区。</p>
         </div>
         {error ? <div className="login-error" role="alert">{error}</div> : null}
         <form className="login-form" onSubmit={(event) => void submit(event)}>
-          <label><span>账号</span><input name="username" autoComplete="username" required autoFocus /></label>
+          <label><span>邮箱</span><input name="email" type="email" autoComplete="email" required autoFocus /></label>
           <label><span>密码</span><input name="password" type="password" autoComplete="current-password" required /></label>
           <button className="github-login" type="submit" disabled={busy}>
             {busy ? <Loader2 className="spinning" size={19} /> : <LogIn size={19} />}
             {busy ? "正在登录" : "登录"}
           </button>
         </form>
-        <p className="login-footnote">账号由管理员预先配置，当前不开放注册。</p>
+        <p className="login-footnote">账号和订阅由 SZLKPassport 统一管理。</p>
       </section>
     </main>
   );

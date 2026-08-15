@@ -8,6 +8,7 @@ import { pool } from "./database.js";
 import { env } from "./env.js";
 import { migrateDatabase } from "./migrate.js";
 import { runnerApiRouter } from "./runner-api.js";
+import { billingApiRouter } from "./billing-api.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,6 +30,7 @@ app.get("/runner/stmweb-runner.mjs", (_request, response) => {
 });
 
 app.use("/api/internal-auth", internalAuthRouter);
+app.use("/api/billing", billingApiRouter);
 app.use("/api/provider-bridge", cloudmcpProviderRouter);
 app.use("/api/runner", runnerApiRouter);
 app.use("/api", apiRouter);

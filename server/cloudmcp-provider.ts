@@ -81,6 +81,7 @@ function authenticate(request: Request): void {
 }
 
 async function operator(): Promise<Operator> {
+  if (!env.STMWEB_ADMIN_USERNAME) throw Object.assign(new Error("旧 CloudMCP Provider Bridge 已进入迁移状态"), { status: 503 });
   const result = await pool.query<Operator>(
     `SELECT u.id AS "userId", w.id AS "workspaceId"
      FROM internal_users u

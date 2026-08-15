@@ -61,6 +61,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal((await fetch(`${base}/bootstrap`, { headers })).status, 401);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await pool.query(`DELETE FROM workspaces WHERE id = ANY($1::uuid[])`, [workspaces.rows.map((item) => item.id)]);
     await pool.query(`DELETE FROM internal_users WHERE id=$1`, [user.rows[0].id]);
     await pool.end();
   }

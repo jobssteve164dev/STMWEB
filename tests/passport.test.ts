@@ -28,9 +28,11 @@ test("uses SZLKPassport v1 envelope and product authentication for login", async
 
 test("creates checkout only for a plan returned by the Passport catalog", async () => {
   const paths: string[] = [];
-  globalThis.fetch = async (input) => {
+  let checkoutBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     paths.push(url.pathname);
+    if (url.pathname.endsWith("/billing/checkout-link")) checkoutBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     const data = url.pathname.endsWith("/billing/catalog")
       ? { plans: [{ planId: "stmweb-pro" }] }
       : { url: "https://checkout.example/session" };
@@ -40,6 +42,8 @@ test("creates checkout only for a plan returned by the Passport catalog", async 
   const result = await createCheckoutLink({ planId: "stmweb-pro", user: { id: "passport-1", email: "user@example.com", name: null } });
   assert.deepEqual(paths, ["/api/v1/billing/catalog", "/api/v1/billing/checkout-link"]);
   assert.equal(result.url, "https://checkout.example/session");
+  assert.equal(checkoutBody?.successUrl, "https://stmweb.example/workbench?checkout=success");
+  assert.equal(checkoutBody?.cancelUrl, "https://stmweb.example/plans?checkout=cancel");
   await assert.rejects(
     createCheckoutLink({ planId: "invented", user: { id: "passport-1", email: "user@example.com", name: null } }),
     /所选方案当前不可用/,

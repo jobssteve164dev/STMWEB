@@ -101,8 +101,8 @@ export async function createCheckoutLink(input: { planId: string; user: Passport
     planId: input.planId,
     userId: input.user.id,
     email: input.user.email,
-    successUrl: `${baseUrl}/?checkout=success`,
-    cancelUrl: `${baseUrl}/?checkout=cancel`,
+    successUrl: `${baseUrl}/workbench?checkout=success`,
+    cancelUrl: `${baseUrl}/plans?checkout=cancel`,
   } });
 }
 

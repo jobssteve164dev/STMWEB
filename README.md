@@ -41,6 +41,8 @@ npm audit --audit-level=high
 
 生产构建输出到 `dist/` 和 `dist-server/`，由 Node.js 服务统一提供页面、鉴权与 API。
 
+公开产品首页位于 `/`，登录后的硬件调试工作台位于 `/workbench`，产品计划位于 `/plans`。页脚法律页面由服务端实时读取 SZLKLAWS 当前发布版本，仓库不保存法律正文副本；价格与结账计划由 SZLKPassport 统一提供。
+
 编译 Runner 不需要 STMWEB 登录用户节点，也不需要开放节点入站端口。用户在“编译与烧录”中生成命令，并通过自己选择的脚本、CI、节点平台或人工方式在 x86 Linux 节点执行。节点必须预先安装与 `STMWEB_BUILD_IMAGE`、`STMWEB_BUILD_IMAGE_ID` 一致的编译镜像；当前用户可在自己的 GitOps 中使用普通 Runner Target 和产物代理完成安装，但这不是其他用户接入 STMWEB 的前提。
 
 ## 当前边界

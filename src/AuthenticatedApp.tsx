@@ -30,7 +30,7 @@ function LoginScreen({ message }: { message?: string }) {
   return (
     <main className="login-page">
       <section className="login-card" aria-labelledby="login-title">
-        <div className="login-brand"><span><ShieldCheck size={24} /></span><strong>STMWEB</strong></div>
+        <a className="login-brand" href="/"><span><ShieldCheck size={24} /></span><strong>STMWEB</strong></a>
         <div className="login-copy">
           <span className="login-kicker"><LockKeyhole size={14} />硬件调试工作台</span>
           <h1 id="login-title">登录后继续调试</h1>
@@ -46,6 +46,7 @@ function LoginScreen({ message }: { message?: string }) {
           </button>
         </form>
         <p className="login-footnote">账号和订阅由 SZLKPassport 统一管理。</p>
+        <nav className="login-links" aria-label="产品与法律信息"><a href="/">产品首页</a><a href="/plans">产品计划</a><a href="/terms">服务条款</a><a href="/privacy">隐私政策</a></nav>
       </section>
     </main>
   );
@@ -62,6 +63,11 @@ export default function AuthenticatedApp() {
 
   useEffect(() => {
     if (!sessionUser) return;
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next === "/plans") {
+      window.location.replace(next);
+      return;
+    }
     let active = true;
     void fetch("/api/bootstrap", { credentials: "same-origin" })
       .then(async (response) => {

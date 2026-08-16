@@ -1,6 +1,6 @@
 # STMWEB 用户 API → CloudMCP → GitOps 固件编译闭环记录
 
-日期：2026-08-16  
+日期：2026-08-16
 状态：功能主链已闭环；旧 Provider Bridge 仍受零流量与人工删除确认门禁保护
 
 可重复执行的正式操作技能：`$stmweb-user-api-runner-build`。技能覆盖正式目录刷新、唯一运行边界、生产配置、签名 Release、一次性配对、Action 安装、真实构建、失败诊断、运行对象归类与旧 Bridge 退役门禁。

@@ -71,7 +71,7 @@ export function requiredApiScope(method: string, path: string): ApiScope | null 
   if (/\/runners$/.test(path)) return "runners:read";
   if (/\/builds\/[^/]+\/cancel$/.test(path)) return "builds:cancel";
   if (/\/builds\/[^/]+\/artifacts\//.test(path)) return "artifacts:read";
-  if (/\/builds\/[^/]+\/events$/.test(path) || /\/builds$/.test(path) && method === "GET") return "builds:read";
+  if (/\/builds\/[^/]+(?:\/events)?$/.test(path) && method === "GET" || /\/builds$/.test(path) && method === "GET") return "builds:read";
   if (/\/builds$/.test(path) && method === "POST") return "builds:create";
   return null;
 }

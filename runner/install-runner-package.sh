@@ -13,7 +13,7 @@ CURRENT_STAGE="package_verify"
 fail() {
   local code="${2:-${CURRENT_STAGE}_failed}"
   [[ "$code" =~ ^[a-z][a-z0-9_]*$ ]] || code="install_failed"
-  printf 'GITOPS_STMWEB_INSTALL_FAILURE_CODE=%s\n' "$code" >&2
+  printf 'STMWEB_RUNNER_INSTALL_FAILURE_CODE=%s\n' "$code" >&2
   if [[ -d "$STATE_ROOT" ]]; then
     printf 'failed:%s\n' "$CURRENT_STAGE" > "$STATE_ROOT/install-stage"
   fi
@@ -149,4 +149,4 @@ systemctl daemon-reload
 systemctl enable --now stmweb-runner
 systemctl is-active --quiet stmweb-runner || fail "编译 Runner 服务未启动" service_start_failed
 record_stage ready
-printf 'GITOPS_STMWEB_FIRMWARE_COMPILATION_READY=1\n'
+printf 'STMWEB_FIRMWARE_COMPILATION_READY=1\n'

@@ -124,7 +124,7 @@ router.get("/workspaces/:workspaceId/devices", asyncRoute(async (request, respon
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id, workspace_id AS "workspaceId", name, model, board, clock, flash, location,
-            firmware_version AS "version", note
+            firmware_version AS "version", note, updated_at AS "updatedAt"
      FROM devices WHERE workspace_id = $1 ORDER BY updated_at DESC`,
     [workspaceId],
   );
@@ -206,6 +206,22 @@ router.get("/workspaces/:workspaceId/sessions", asyncRoute(async (request, respo
     [workspaceId],
   );
   response.json({ sessions: result.rows });
+}));
+
+router.get("/workspaces/:workspaceId/sessions/:sessionId", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const sessionId = uuid.parse(request.params.sessionId);
+  requireConnectionWorkspace(request, workspaceId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query(
+    `SELECT id,device_id AS "deviceId",device_name AS "deviceName",connection_label AS "connectionLabel",
+            status,event_count AS "eventCount",is_demo AS "isDemo",started_at AS "startedAt",ended_at AS "endedAt"
+     FROM debug_sessions WHERE id=$1 AND workspace_id=$2`,
+    [sessionId, workspaceId],
+  );
+  if (!result.rows[0]) { response.status(404).json({ error: "调试会话不存在" }); return; }
+  response.json({ session: result.rows[0] });
 }));
 
 router.put("/sessions/:sessionId", asyncRoute(async (request, response) => {
@@ -338,6 +354,8 @@ router.post("/workspaces/:workspaceId/runners/pairing", asyncRoute(async (reques
   response.status(201).json({
     code,
     expiresAt: expiresAt.toISOString(),
+    buildImage: env.STMWEB_BUILD_IMAGE,
+    buildImageId: env.STMWEB_BUILD_IMAGE_ID,
     command: `curl -fsSL ${shellArgument(`${origin}/install-runner.sh`)} | sudo bash -s -- --url ${shellArgument(origin)} --code ${shellArgument(code)} --image ${shellArgument(env.STMWEB_BUILD_IMAGE)} --image-id ${shellArgument(env.STMWEB_BUILD_IMAGE_ID)}`,
   });
 }));
@@ -355,6 +373,23 @@ router.get("/workspaces/:workspaceId/builds", asyncRoute(async (request, respons
     [workspaceId],
   );
   response.json({ builds: result.rows });
+}));
+
+router.get("/workspaces/:workspaceId/builds/:jobId", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const jobId = uuid.parse(request.params.jobId);
+  requireConnectionWorkspace(request, workspaceId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query(
+    `SELECT j.id,j.runner_id AS "runnerId",r.name AS "runnerName",j.name,j.profile,j.target,j.source_name AS "sourceName",
+       j.source_sha256 AS "sourceSha256",j.status,j.progress,j.error,j.created_at AS "createdAt",j.started_at AS "startedAt",j.finished_at AS "finishedAt",
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
+     FROM build_jobs j JOIN build_runners r ON r.id=j.runner_id WHERE j.id=$1 AND j.workspace_id=$2`,
+    [jobId, workspaceId],
+  );
+  if (!result.rows[0]) { response.status(404).json({ error: "构建不存在" }); return; }
+  response.json({ build: result.rows[0] });
 }));
 
 router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), asyncRoute(async (request, response) => {
@@ -389,14 +424,14 @@ router.post("/workspaces/:workspaceId/builds/:jobId/cancel", asyncRoute(async (r
   requireConnectionWorkspace(request, workspaceId);
   const jobId = uuid.parse(request.params.jobId);
   await requireWorkspace(user.id, workspaceId, true);
-  const result = await pool.query(
+  const result = await pool.query<{ id: string; status: string }>(
     `UPDATE build_jobs SET desired_state='cancelled',status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
        finished_at=CASE WHEN status='queued' THEN now() ELSE finished_at END,updated_at=now()
-     WHERE id=$1 AND workspace_id=$2 AND status IN ('queued','leased','running') RETURNING id`,
+     WHERE id=$1 AND workspace_id=$2 AND status IN ('queued','leased','running') RETURNING id,status`,
     [jobId,workspaceId],
   );
   if (!result.rowCount) { response.status(409).json({ error: "构建已经结束或不存在" }); return; }
-  response.json({ success: true });
+  response.json({ success: true, build: { id: result.rows[0].id, status: result.rows[0].status, desiredState: "cancelled" } });
 }));
 
 router.get("/workspaces/:workspaceId/builds/:jobId/events", asyncRoute(async (request, response) => {

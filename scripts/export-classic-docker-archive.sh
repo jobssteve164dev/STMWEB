@@ -13,7 +13,6 @@ WORK_ROOT="$(mktemp -d "$TASK_TEMP_ROOT/stmweb-classic-archive.XXXXXX")"
 SKOPEO_ARCHIVE="$WORK_ROOT/skopeo.tar"
 SOURCE_LAYOUT="$WORK_ROOT/source"
 CLASSIC_LAYOUT="$WORK_ROOT/classic"
-RAW_ARCHIVE="$WORK_ROOT/image.tar"
 cleanup() {
   find "$WORK_ROOT" -xdev -depth -mindepth 1 -delete
   rmdir "$WORK_ROOT"
@@ -28,6 +27,7 @@ fi
 skopeo copy --src-daemon-host "$SKOPEO_DAEMON_HOST" \
   "docker-daemon:$IMAGE" "docker-archive:$SKOPEO_ARCHIVE:$IMAGE"
 tar -xf "$SKOPEO_ARCHIVE" -C "$SOURCE_LAYOUT"
+find "$SKOPEO_ARCHIVE" -maxdepth 0 -type f -delete
 
 mapfile -t ORIGINAL_LAYERS < <(jq -r '.[0].Layers[]' "$SOURCE_LAYOUT/manifest.json")
 (( ${#ORIGINAL_LAYERS[@]} > 0 )) || { echo "image archive has no layers" >&2; exit 1; }
@@ -37,7 +37,7 @@ for layer_file in "${ORIGINAL_LAYERS[@]}"; do
   [[ -n "$layer_dir" ]] || { echo "unable to resolve classic layer for $layer_file" >&2; exit 1; }
   layer_dir="${layer_dir#"$SOURCE_LAYOUT/"}"
   mkdir -p "$CLASSIC_LAYOUT/$layer_dir"
-  cp "$SOURCE_LAYOUT/$layer_file" "$CLASSIC_LAYOUT/$layer_dir/layer.tar"
+  ln "$SOURCE_LAYOUT/$layer_file" "$CLASSIC_LAYOUT/$layer_dir/layer.tar"
   CLASSIC_LAYER_PATHS+=("$layer_dir/layer.tar")
 done
 
@@ -52,9 +52,9 @@ CONFIG_FILE="$(jq -r '.[0].Config' "$CLASSIC_LAYOUT/manifest.json")"
 cp "$SOURCE_LAYOUT/$CONFIG_FILE" "$CLASSIC_LAYOUT/$CONFIG_FILE"
 
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-  -cf "$RAW_ARCHIVE" -C "$CLASSIC_LAYOUT" \
-  manifest.json repositories "$CONFIG_FILE" "${CLASSIC_LAYER_PATHS[@]%/layer.tar}"
-gzip -nc "$RAW_ARCHIVE" > "$OUTPUT"
+  -cf - -C "$CLASSIC_LAYOUT" \
+  manifest.json repositories "$CONFIG_FILE" "${CLASSIC_LAYER_PATHS[@]%/layer.tar}" \
+  | gzip -n > "$OUTPUT"
 
 ARCHIVE_LIST="$WORK_ROOT/archive-files.txt"
 tar -tzf "$OUTPUT" > "$ARCHIVE_LIST"

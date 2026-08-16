@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, runner, dockerfile, dockerignore, schema] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, classicArchiveExporter, runner, dockerfile, dockerignore, schema] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
   read("runner/install-runner-package.sh"),
   read("scripts/build-firmware-compilation-release.sh"),
   read("scripts/verify-firmware-compilation-release.sh"),
+  read("scripts/export-classic-docker-archive.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
   read(".dockerignore"),
@@ -27,6 +28,10 @@ assert.doesNotMatch(installer, /command -v node/);
 assert.match(installer, /--entrypoint node/);
 assert.match(installer, /\/var\/run\/docker\.sock/);
 assert.match(packageBuilder, /export-classic-docker-archive\.sh/);
+assert.match(classicArchiveExporter, /find "\$SKOPEO_ARCHIVE" -maxdepth 0 -type f -delete/);
+assert.match(classicArchiveExporter, /ln "\$SOURCE_LAYOUT\/\$layer_file" "\$CLASSIC_LAYOUT\/\$layer_dir\/layer\.tar"/);
+assert.match(classicArchiveExporter, /-cf - -C "\$CLASSIC_LAYOUT"[\s\S]*\| gzip -n > "\$OUTPUT"/);
+assert.doesNotMatch(classicArchiveExporter, /RAW_ARCHIVE/);
 assert.match(packageBuilder, /stmweb-firmware-compilation-linux-amd64/);
 assert.match(packageBuilder, /build_context_bytes/);
 assert.match(packageBuilder, /largest_source_contributors/);

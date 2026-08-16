@@ -14,6 +14,19 @@ const sharedDocuments: Record<string, string> = {
 
 const router = express.Router();
 
+async function fetchLegalDocument(url: URL): Promise<globalThis.Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await fetch(url, { headers: { accept: "application/json" } });
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 router.get("/:document", async (request: Request, response: Response, next: NextFunction) => {
   try {
     const documentParam = request.params.document;
@@ -32,7 +45,7 @@ router.get("/:document", async (request: Request, response: Response, next: Next
     url.searchParams.set("product", env.PASSPORT_PRODUCT);
     url.searchParams.set("locale", "zh-CN");
     if (type) url.searchParams.set("type", type);
-    const upstream = await fetch(url, { headers: { accept: "application/json" } });
+    const upstream = await fetchLegalDocument(url);
     const body = await upstream.text();
     response.status(upstream.status).set({
       "Content-Type": "application/json; charset=utf-8",

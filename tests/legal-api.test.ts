@@ -21,9 +21,12 @@ function requestJson(port: number, path: string) {
 
 test("proxies shared and product-specific legal pages from SZLKLAWS", async (context) => {
   const upstreamUrls: string[] = [];
+  let attempts = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
     upstreamUrls.push(String(input));
+    attempts += 1;
+    if (attempts === 1) throw new TypeError("temporary DNS lookup failure");
     return new Response(JSON.stringify({ success: true, document: { title: "服务条款" } }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -45,14 +48,15 @@ test("proxies shared and product-specific legal pages from SZLKLAWS", async (con
   assert.equal((await requestJson(address.port, "/api/legal/terms")).status, 200);
   assert.equal((await requestJson(address.port, "/api/legal/legal-supplement")).status, 200);
 
-  const shared = new URL(upstreamUrls[0]);
+  assert.equal(upstreamUrls.length, 3);
+  const shared = new URL(upstreamUrls[1]);
   assert.equal(shared.origin, "https://laws.example");
   assert.equal(shared.pathname, "/api/legal/document");
   assert.equal(shared.searchParams.get("product"), "stmweb");
   assert.equal(shared.searchParams.get("type"), "terms_of_service");
   assert.equal(shared.searchParams.get("locale"), "zh-CN");
 
-  const supplement = new URL(upstreamUrls[1]);
+  const supplement = new URL(upstreamUrls[2]);
   assert.equal(supplement.pathname, "/api/legal/product-supplement");
   assert.equal(supplement.searchParams.get("product"), "stmweb");
   assert.equal(supplement.searchParams.has("type"), false);

@@ -95,8 +95,17 @@ BUILD_IMAGE="${VALUES[0]}"
 (( $(awk '/MemTotal:/ { print int($2 / 1024) }' /proc/meminfo) >= VALUES[2] )) || fail "节点内存不足" insufficient_memory
 (( $(df -Pm / | awk 'NR == 2 { print $4 }') >= VALUES[3] )) || fail "节点可用磁盘不足" insufficient_storage
 
-if [[ -s "$STATE_ROOT/state.json" ]]; then
-  fail "这台节点已经连接；转移工作区前请先正式解除原连接" runner_upgrade_unauthorized
+EXISTING_REGISTRATION=0
+if [[ -s "$STATE_ROOT/state.json" && ! -L "$STATE_ROOT/state.json" ]]; then
+  python3 - "$STATE_ROOT/state.json" "$CONTROL_URL" <<'PY' \
+    || fail "现有编译算力身份无效" runner_upgrade_unauthorized
+import json, pathlib, re, sys
+state = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if state.get("controlUrl") != sys.argv[2]: raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", str(state.get("runnerId", "")), re.I): raise SystemExit(1)
+if not isinstance(state.get("deviceToken"), str) or len(state["deviceToken"]) < 32: raise SystemExit(1)
+PY
+  EXISTING_REGISTRATION=1
 fi
 
 record_stage runtime_load
@@ -115,13 +124,15 @@ install -m 0755 "$PACKAGE_ROOT/bin/stmweb-runner.mjs" "$INSTALL_ROOT/stmweb-runn
 PAIRING_CODE="$(tr -d '\r\n' < "$PAIRING_CODE_FILE")"
 [[ "$PAIRING_CODE" =~ ^[A-Za-z0-9_-]{6,64}$ ]] || fail "配对码格式无效" invalid_request
 unset PAIRING_CODE
-docker run --rm --entrypoint node \
-  -e STMWEB_BUILD_IMAGE="$BUILD_IMAGE" -e STMWEB_BUILD_IMAGE_ID="$BUILD_IMAGE_ID" \
-  -v "$INSTALL_ROOT:$INSTALL_ROOT:ro" -v "$STATE_ROOT:$STATE_ROOT" \
-  -v "$PAIRING_CODE_FILE:/run/stmweb-pairing-code:ro" \
-  "$BUILD_IMAGE" "$INSTALL_ROOT/stmweb-runner.mjs" register \
-  --url "$CONTROL_URL" --code-file /run/stmweb-pairing-code --state-dir "$STATE_ROOT" \
-  || fail "编译 Runner 注册失败" runner_registration_failed
+if [[ "$EXISTING_REGISTRATION" -eq 0 ]]; then
+  docker run --rm --entrypoint node \
+    -e STMWEB_BUILD_IMAGE="$BUILD_IMAGE" -e STMWEB_BUILD_IMAGE_ID="$BUILD_IMAGE_ID" \
+    -v "$INSTALL_ROOT:$INSTALL_ROOT:ro" -v "$STATE_ROOT:$STATE_ROOT" \
+    -v "$PAIRING_CODE_FILE:/run/stmweb-pairing-code:ro" \
+    "$BUILD_IMAGE" "$INSTALL_ROOT/stmweb-runner.mjs" register \
+    --url "$CONTROL_URL" --code-file /run/stmweb-pairing-code --state-dir "$STATE_ROOT" \
+    || fail "编译 Runner 注册失败" runner_registration_failed
+fi
 
 cat > "$SYSTEMD_UNIT_PATH" <<EOF
 [Unit]
@@ -146,7 +157,8 @@ ReadWritePaths=$STATE_ROOT /tmp
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now stmweb-runner
+systemctl enable stmweb-runner
+systemctl restart stmweb-runner
 systemctl is-active --quiet stmweb-runner || fail "编译 Runner 服务未启动" service_start_failed
 record_stage ready
 printf 'STMWEB_FIRMWARE_COMPILATION_READY=1\n'

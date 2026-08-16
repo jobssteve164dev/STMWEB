@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname } from "node:os";
 import path from "node:path";
 
 const VERSION = "0.1.0";
@@ -125,7 +125,9 @@ async function uploadArtifact(state, job, file, kind) {
 
 async function execute(stateDir, state, job) {
   if (!allowedProfiles.has(job.profile) || !allowedTargets.has(job.target)) throw new Error("Runner 不支持该构建配置");
-  const root = await mkdtemp(path.join(tmpdir(), `stmweb-build-${job.id.slice(0, 8)}-`));
+  const retainedRoot = path.join(stateDir, "build-history");
+  await mkdir(retainedRoot, { recursive: true, mode: 0o700 });
+  const root = await mkdtemp(path.join(retainedRoot, `${job.id}-`));
   const archive = path.join(root, "source.zip");
   const source = path.join(root, "source");
   const output = path.join(root, "output");
@@ -205,9 +207,7 @@ async function execute(stateDir, state, job) {
     }
     await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "completed", "构建完成", { artifactCount: artifacts.length })]);
   } finally {
-    const retainedRoot = path.join(stateDir, "build-history");
-    await mkdir(retainedRoot, { recursive: true, mode: 0o700 });
-    await rename(root, path.join(retainedRoot, `${job.id}-${Date.now()}`));
+    await chmod(root, 0o700);
   }
 }
 

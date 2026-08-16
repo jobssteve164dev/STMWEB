@@ -8,6 +8,20 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
   process.env.DATABASE_URL = databaseUrl;
   process.env.BETTER_AUTH_SECRET ||= "test-secret-that-is-at-least-32-characters";
   process.env.BETTER_AUTH_URL ||= "http://127.0.0.1:8080";
+  process.env.SZLK_PASSPORT_URL = "https://passport.example";
+  process.env.SZLK_PASSPORT_SECRET = "test-product-secret";
+
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.origin === "https://passport.example") {
+      return new Response(JSON.stringify({ ok: true, data: { allowed: true, featureKey: "paid_subscription" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return nativeFetch(input, init);
+  };
 
   const express = (await import("express")).default;
   const { pool } = await import("../server/database.js");
@@ -80,6 +94,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
       method: "POST", headers, body: JSON.stringify({ tool: "list_tools", params: {} }),
     })).status, 401);
   } finally {
+    globalThis.fetch = nativeFetch;
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await pool.query(`DELETE FROM workspaces WHERE id = ANY($1::uuid[])`, [workspaces.rows.map((item) => item.id)]);
     await pool.query(`DELETE FROM internal_users WHERE id=$1`, [user.rows[0].id]);

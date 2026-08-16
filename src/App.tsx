@@ -76,6 +76,7 @@ import {
 } from "./device-capabilities.js";
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
+import { useLocale } from "./i18n.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
 
@@ -105,12 +106,12 @@ interface AppProps {
   onSignOut: () => void;
 }
 
-const navigation: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
-  { id: "console", label: "调试台", icon: LayoutDashboard },
-  { id: "devices", label: "设备台账", icon: Cpu },
-  { id: "firmware", label: "固件版本", icon: Box },
-  { id: "sessions", label: "会话记录", icon: History },
-  { id: "settings", label: "设置", icon: Settings },
+const navigation: Array<{ id: ViewId; zh: string; en: string; icon: LucideIcon }> = [
+  { id: "console", zh: "调试台", en: "Workbench", icon: LayoutDashboard },
+  { id: "devices", zh: "设备台账", en: "Devices", icon: Cpu },
+  { id: "firmware", zh: "固件版本", en: "Firmware", icon: Box },
+  { id: "sessions", zh: "会话记录", en: "Sessions", icon: History },
+  { id: "settings", zh: "设置", en: "Settings", icon: Settings },
 ];
 
 const emptyDevice: DeviceRecord = {
@@ -143,13 +144,6 @@ const capabilityIcons: Record<HardwareCapabilityId, LucideIcon> = {
   bluetooth: Bluetooth,
   network: Wifi,
 };
-
-const sessionDateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 const commonBaudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
@@ -218,6 +212,9 @@ function EmptyState({ icon: Icon, title, body, action }: {
 }
 
 function App({ workspace, user, planAccess, onSignOut }: AppProps) {
+  const { isEnglish, locale } = useLocale();
+  const c = (zh: string, en: string) => isEnglish ? en : zh;
+  const sessionDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }), [locale]);
   const [activeView, setActiveView] = useState<ViewId>("console");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
@@ -255,7 +252,14 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
   const terminalRef = useRef<HTMLDivElement | null>(null);
   const dotTelemetryCarryRef = useRef("");
 
-  const selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? emptyDevice;
+  const selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? {
+    ...emptyDevice,
+    name: c("未登记设备", "Unregistered device"),
+    model: c("待填写", "Not provided"),
+    board: c("待填写", "Not provided"),
+    location: c("未指定位置", "Location not specified"),
+    version: c("未关联", "Not linked"),
+  };
   const activeCapability = capabilities.find((item) => item.id === selectedCapability);
 
   const combinedFirmware = useMemo(
@@ -289,7 +293,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       .catch(() => {
         if (!active) return;
         setStorageHealthy(false);
-        setToast({ tone: "warning", message: "工作区数据暂时无法加载，请检查网络后重试" });
+        setToast({ tone: "warning", message: c("工作区数据暂时无法加载，请检查网络后重试", "Workspace data could not be loaded. Check your connection and try again.") });
       });
 
     return () => {
@@ -335,9 +339,9 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       setDevices((current) => [device, ...current]);
       setSelectedDeviceId(device.id);
       setDeviceDialogOpen(false);
-      setToast({ tone: "success", message: `${device.name} 已加入设备台账` });
+      setToast({ tone: "success", message: c(`${device.name} 已加入设备台账`, `${device.name} was added to the device registry`) });
     } catch (reason) {
-      setToast({ tone: "warning", message: reason instanceof Error ? reason.message : "设备保存失败" });
+      setToast({ tone: "warning", message: reason instanceof Error ? reason.message : c("设备保存失败", "The device could not be saved") });
     } finally {
       setDeviceBusy(false);
     }
@@ -377,7 +381,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
   function handleStorageError() {
     setStorageHealthy(false);
-    setToast({ tone: "warning", message: "调试记录尚未保存，请检查网络后重试" });
+    setToast({ tone: "warning", message: c("调试记录尚未保存，请检查网络后重试", "The debugging record has not been saved. Check your connection and try again.") });
   }
 
   function appendEvent(
@@ -415,7 +419,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       id: crypto.randomUUID(),
       projectId: workspace.id,
       deviceName: selectedDevice.name,
-      connectionLabel: options.label ?? connectionInfo?.name ?? "浏览器设备",
+      connectionLabel: options.label ?? connectionInfo?.name ?? c("浏览器设备", "Browser device"),
       startedAt: new Date().toISOString(),
       status: "recording",
       eventCount: 0,
@@ -429,7 +433,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     setTelemetry([]);
     setTelemetrySnapshot(emptyTelemetrySnapshot);
     void saveSession(session).catch(handleStorageError);
-    appendEvent("success", `会话已开始 · ${session.connectionLabel}`);
+    appendEvent("success", c(`会话已开始 · ${session.connectionLabel}`, `Session started · ${session.connectionLabel}`));
 
     if (isDemo) {
       let tick = 0;
@@ -467,11 +471,11 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
           voltage: Number(voltage.toFixed(3)),
           signal,
         });
-        if (tick % 7 === 0) appendEvent("info", "传感器采样周期稳定 · 1000 ms");
+        if (tick % 7 === 0) appendEvent("info", c("传感器采样周期稳定 · 1000 ms", "Sensor sampling interval stable · 1000 ms"));
       }, 900);
     }
 
-    setToast({ tone: "success", message: isDemo ? "演示会话正在记录" : "调试会话正在记录" });
+    setToast({ tone: "success", message: isDemo ? c("演示会话正在记录", "Demo session is recording") : c("调试会话正在记录", "Debugging session is recording") });
   }
 
   async function stopSession() {
@@ -480,7 +484,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       demoIntervalRef.current = null;
     }
     if (!currentSessionRef.current) return;
-    appendEvent("info", "记录已停止，数据已写入工作区台账");
+    appendEvent("info", c("记录已停止，数据已写入工作区台账", "Recording stopped and data was written to the workspace ledger"));
     const completed: DebugSessionRecord = {
       ...currentSessionRef.current,
       endedAt: new Date().toISOString(),
@@ -490,20 +494,20 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     setCurrentSession(null);
     setSessions((current) => [completed, ...current.filter((item) => item.id !== completed.id)]);
     await saveSession(completed).catch(handleStorageError);
-    setToast({ tone: "success", message: `已保存 ${completed.eventCount} 条调试记录` });
+    setToast({ tone: "success", message: c(`已保存 ${completed.eventCount} 条调试记录`, `${completed.eventCount} debugging records saved`) });
   }
 
   function beginDemoSession() {
     if (!connectionInfo) {
       setConnectionInfo({
-        name: "演示设备",
-        detail: "生成可识别的模拟遥测，不会操作真实硬件",
+        name: c("演示设备", "Demo device"),
+        detail: c("生成可识别的模拟遥测，不会操作真实硬件", "Generates identifiable simulated telemetry without operating real hardware"),
         kind: "demo",
         isDemo: true,
       });
     }
     setDeviceManifest(demoCapabilityManifest);
-    startSession({ isDemo: true, label: "演示设备" });
+    startSession({ isDemo: true, label: c("演示设备", "Demo device") });
   }
 
   async function connectHardware(kind: HardwareCapabilityId) {
@@ -511,7 +515,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     try {
       const baudRate = Number(serialBaudRate === "custom" ? customBaudRate : serialBaudRate);
       if (kind === "serial" && (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4_000_000)) {
-        throw new Error("波特率请输入 300 到 4000000 之间的整数");
+        throw new Error(c("波特率请输入 300 到 4000000 之间的整数", "Enter an integer baud rate between 300 and 4,000,000"));
       }
       const connection = await requestHardwareConnection(kind, {
         networkUrl,
@@ -526,7 +530,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
           const manifest = parseCapabilityManifest(text);
           if (manifest) {
             setDeviceManifest(manifest);
-            appendEvent("success", `已识别 ${manifest.capabilities.length} 项设备能力`, {
+            appendEvent("success", c(`已识别 ${manifest.capabilities.length} 项设备能力`, `${manifest.capabilities.length} device capabilities detected`), {
               model: manifest.device.model,
               firmwareVersion: manifest.device.firmwareVersion,
             });
@@ -542,7 +546,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               return next;
             });
           }
-          appendEvent("data", text.trim() || "收到串口数据");
+          appendEvent("data", text.trim() || c("收到串口数据", "Serial data received"));
         },
       });
       connectionRef.current = connection;
@@ -555,11 +559,11 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       if (kind !== "serial" && kind !== "bluetooth") setDeviceManifest(null);
       setConnectionDialogOpen(false);
       setSelectedCapability(null);
-      setToast({ tone: "success", message: `${connection.name} 已连接` });
+      setToast({ tone: "success", message: c(`${connection.name} 已连接`, `${connection.name} connected`) });
     } catch (error) {
       setToast({
         tone: "warning",
-        message: error instanceof Error ? error.message : "设备连接失败，请重试",
+        message: error instanceof Error ? error.message : c("设备连接失败，请重试", "The device could not connect. Try again."),
       });
     } finally {
       setConnecting(null);
@@ -576,7 +580,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     setTelemetry([]);
     dotTelemetryCarryRef.current = "";
     setLogs([]);
-    setToast({ tone: "info", message: "设备连接已断开" });
+    setToast({ tone: "info", message: c("设备连接已断开", "Device disconnected") });
   }
 
   async function importFirmware(event: ChangeEvent<HTMLInputElement>) {
@@ -598,9 +602,9 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       };
       const savedVersion = await saveFirmwareVersion(version);
       setFirmwareVersions((current) => [savedVersion, ...current.filter((item) => item.id !== savedVersion.id)]);
-      setToast({ tone: "success", message: `${file.name} 已校验并保存` });
+      setToast({ tone: "success", message: c(`${file.name} 已校验并保存`, `${file.name} was verified and saved`) });
     } catch {
-      setToast({ tone: "warning", message: "固件文件保存失败，请检查浏览器存储空间" });
+      setToast({ tone: "warning", message: c("固件文件保存失败，请检查浏览器存储空间", "The firmware file could not be saved. Check available browser storage.") });
     } finally {
       setFileBusy(false);
     }
@@ -616,35 +620,35 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       anchor.download = `stmweb-session-${session.id.slice(0, 8)}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setToast({ tone: "success", message: "会话记录已导出" });
+      setToast({ tone: "success", message: c("会话记录已导出", "Session history exported") });
     } catch {
-      setToast({ tone: "warning", message: "会话导出失败，请稍后重试" });
+      setToast({ tone: "warning", message: c("会话导出失败，请稍后重试", "The session could not be exported. Try again shortly.") });
     }
   }
 
   const currentTemperature = telemetry.at(-1);
-  const storageLabel = storageHealthy ? "工作区数据库" : "暂不可用";
+  const storageLabel = storageHealthy ? c("工作区数据库", "Workspace database") : c("暂不可用", "Unavailable");
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#main-content">跳到主要内容</a>
+      <a className="skip-link" href="#main-content">{c("跳到主要内容", "Skip to main content")}</a>
 
-      <aside className="sidebar" aria-label="主导航">
+      <aside className="sidebar" aria-label={c("主导航", "Primary navigation")}>
         <div className="brand-row">
           <span className="brand-mark" aria-hidden="true"><Activity size={22} /></span>
           <div>
             <strong>STMWEB</strong>
-            <span>硬件调试工作台</span>
+            <span>{c("硬件调试工作台", "Hardware Debugging Workbench")}</span>
           </div>
         </div>
 
-        <div className="workspace-select" aria-label="当前工作区">
+        <div className="workspace-select" aria-label={c("当前工作区", "Current workspace")}>
           <span className="workspace-avatar">H</span>
-          <span><small>当前工作区</small><strong>{workspace.name}</strong></span>
+          <span><small>{c("当前工作区", "Current workspace")}</small><strong>{workspace.name}</strong></span>
         </div>
 
         <nav className="main-nav">
-          <span className="nav-label">工作区</span>
+          <span className="nav-label">{c("工作区", "Workspace")}</span>
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
@@ -656,7 +660,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                 aria-current={activeView === item.id ? "page" : undefined}
               >
                 <Icon size={18} aria-hidden="true" />
-                <span>{item.label}</span>
+                <span>{isEnglish ? item.en : item.zh}</span>
                 {item.id === "sessions" && sessions.length > 0 ? <b>{sessions.length}</b> : null}
               </button>
             );
@@ -665,7 +669,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
         <div className="sidebar-devices">
           <div className="section-heading compact">
-            <span>最近设备</span>
+            <span>{c("最近设备", "Recent devices")}</span>
           </div>
           {devices.map((device) => (
             <button
@@ -687,11 +691,11 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
         <div className="storage-status">
           <ShieldCheck size={18} aria-hidden="true" />
-          <div><strong>{storageHealthy ? "自动记录已开启" : "记录存储受限"}</strong><span>{storageLabel}</span></div>
+          <div><strong>{storageHealthy ? c("自动记录已开启", "Automatic recording is on") : c("记录存储受限", "Record storage is limited")}</strong><span>{storageLabel}</span></div>
         </div>
         <a className="workbench-plan-link" href="/plans">
           <BadgeDollarSign size={18} aria-hidden="true" />
-          <span><strong>{planAccess.pro ? "Pro 计划" : "免费计划"}</strong><small>{planAccess.pro ? "Runner 与 API 已解锁" : "查看 Pro 能力"}</small></span>
+          <span><strong>{planAccess.pro ? c("Pro 计划", "Pro plan") : c("免费计划", "Free plan")}</strong><small>{planAccess.pro ? c("Runner 与 API 已解锁", "Runner & API unlocked") : c("查看 Pro 能力", "Explore Pro capabilities")}</small></span>
         </a>
       </aside>
 
@@ -701,8 +705,8 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
             <span>{workspace.name}</span><span>/</span><strong>{selectedDevice.name}</strong>
           </div>
           <div className="topbar-status">
-            <span className="environment-badge"><span />数据已同步</span>
-            <button className="account-button" type="button" onClick={onSignOut} title={`${user.name} · 退出登录`}>
+            <span className="environment-badge"><span />{c("数据已同步", "Data synced")}</span>
+            <button className="account-button" type="button" onClick={onSignOut} title={`${user.name} · ${c("退出登录", "Sign out")}`} aria-label={`${user.name} · ${c("退出登录", "Sign out")}`}>
               <span className="account-mark">{user.name.slice(0, 2).toUpperCase()}</span>
               <LogOut size={16} />
             </button>
@@ -710,6 +714,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
         </header>
 
         <main id="main-content" className="main-content">
+          <div className="view-transition" key={activeView}>
           {activeView === "console" ? (
             <>
               <section className="device-hero" aria-labelledby="device-title">
@@ -717,7 +722,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                 <div className="hero-copy">
                   <div className="eyebrow-row">
                     <span className={connectionInfo ? "state-pill online" : "state-pill"}>
-                      <span />{connectionInfo ? "已连接" : "等待连接"}
+                      <span />{connectionInfo ? c("已连接", "Connected") : c("等待连接", "Waiting to connect")}
                     </span>
                     <span>{selectedDevice.board}</span>
                   </div>
@@ -732,30 +737,30 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                         type="button"
                         onClick={() => currentSession ? void stopSession() : startSession()}
                       >
-                        {currentSession ? <><Square size={17} />停止记录</> : <><CircleDot size={17} />开始记录</>}
+                        {currentSession ? <><Square size={17} />{c("停止记录", "Stop Recording")}</> : <><CircleDot size={17} />{c("开始记录", "Start Recording")}</>}
                       </button>
                       <button className="secondary-button" type="button" onClick={() => void disconnectHardware()}>
-                        断开
+                        {c("断开", "Disconnect")}
                       </button>
                     </>
                   ) : (
                     <>
                       <button className="primary-button" type="button" onClick={() => setConnectionDialogOpen(true)}>
-                        <Plug size={17} aria-hidden="true" />连接设备
+                        <Plug size={17} aria-hidden="true" />{c("连接设备", "Connect Device")}
                       </button>
                       <button className="secondary-button" type="button" onClick={beginDemoSession}>
-                        <Play size={17} aria-hidden="true" />试用演示
+                        <Play size={17} aria-hidden="true" />{c("试用演示", "Try Demo")}
                       </button>
                     </>
                   )}
                 </div>
               </section>
 
-              <section className="metrics-grid" aria-label="设备摘要">
-                <MetricCard label="当前固件" value={selectedDevice.version || "未关联"} note="设备台账" icon={FileCode2} />
-                <MetricCard label="已存会话" value={String(sessions.length)} note="工作区数据库" icon={Database} />
-                <MetricCard label="连接方式" value={connectionInfo ? connectionInfo.kind.toUpperCase() : "—"} note={connectionInfo ? connectionInfo.name : "尚未选择"} icon={Cable} />
-                <MetricCard label="实时温度" value={currentTemperature ? `${currentTemperature.toFixed(1)}°C` : "—"} note={currentSession?.isDemo ? "演示遥测" : "等待数据"} icon={Gauge} />
+              <section className="metrics-grid" aria-label={c("设备摘要", "Device summary")}>
+                <MetricCard label={c("当前固件", "Current firmware")} value={selectedDevice.version || c("未关联", "Not linked")} note={c("设备台账", "Device registry")} icon={FileCode2} />
+                <MetricCard label={c("已存会话", "Saved sessions")} value={String(sessions.length)} note={c("工作区数据库", "Workspace database")} icon={Database} />
+                <MetricCard label={c("连接方式", "Connection")} value={connectionInfo ? connectionInfo.kind.toUpperCase() : "—"} note={connectionInfo ? connectionInfo.name : c("尚未选择", "Not selected")} icon={Cable} />
+                <MetricCard label={c("实时温度", "Live temperature")} value={currentTemperature ? `${currentTemperature.toFixed(1)}°C` : "—"} note={currentSession?.isDemo ? c("演示遥测", "Demo telemetry") : c("等待数据", "Waiting for data")} icon={Gauge} />
               </section>
 
               {deviceManifest ? (
@@ -770,7 +775,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               ) : connectionInfo ? (
                 <section className="manifest-waiting" aria-live="polite">
                   <Loader2 className="spinning" size={22} />
-                  <div><strong>正在识别设备能力</strong><span>固件报告硬件状态后，可选择本次需要的调试组件。</span></div>
+                  <div><strong>{c("正在识别设备能力", "Detecting device capabilities")}</strong><span>{c("固件报告硬件状态后，可选择本次需要的调试组件。", "Choose the components you need once the firmware reports hardware status.")}</span></div>
                 </section>
               ) : null}
 
@@ -778,15 +783,15 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
                 <article className="panel terminal-panel">
                   <div className="panel-heading terminal-heading">
-                    <div><span className="panel-kicker">会话输出</span><h2>调试终端</h2></div>
-                    <span>{logs.length} 条</span>
+                    <div><span className="panel-kicker">{c("会话输出", "Session output")}</span><h2>{c("调试终端", "Debug terminal")}</h2></div>
+                    <span>{c(`${logs.length} 条`, `${logs.length} entries`)}</span>
                   </div>
-                  <div className="terminal" ref={terminalRef} role="log" aria-label="调试会话输出">
+                  <div className="terminal" ref={terminalRef} role="log" aria-label={c("调试会话输出", "Debug session output")}>
                     {logs.length === 0 ? (
-                      <div className="terminal-empty"><SquareTerminal size={22} /><span>连接设备或启动演示后，输出会显示在这里。</span></div>
+                      <div className="terminal-empty"><SquareTerminal size={22} /><span>{c("连接设备或启动演示后，输出会显示在这里。", "Output appears here after you connect a device or start the demo.")}</span></div>
                     ) : logs.map((log) => (
                       <div className={`log-line ${log.level}`} key={log.id}>
-                        <time>{new Date(log.recordedAt).toLocaleTimeString("zh-CN", { hour12: false })}</time>
+                        <time>{new Date(log.recordedAt).toLocaleTimeString(locale, { hour12: false })}</time>
                         <span>{log.message}</span>
                       </div>
                     ))}
@@ -795,14 +800,14 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
                 <article className="panel capability-panel">
                   <div className="panel-heading">
-                    <div><span className="panel-kicker">浏览器环境</span><h2>本机连接能力</h2></div>
-                    <button type="button" aria-label="重新检测" onClick={() => void inspectHardwareCapabilities().then(setCapabilities)}>
+                    <div><span className="panel-kicker">{c("浏览器环境", "Browser environment")}</span><h2>{c("本机连接能力", "Local connectivity")}</h2></div>
+                    <button type="button" aria-label={c("重新检测", "Detect again")} onClick={() => void inspectHardwareCapabilities().then(setCapabilities)}>
                       <RefreshCw size={16} />
                     </button>
                   </div>
                   <div className="capability-list">
                     {capabilities.length === 0 ? (
-                      <div className="capability-loading"><Loader2 size={18} />正在检测浏览器能力</div>
+                      <div className="capability-loading"><Loader2 size={18} />{c("正在检测浏览器能力", "Detecting browser capabilities…")}</div>
                     ) : capabilities.map((capability) => {
                       const Icon = capabilityIcons[capability.id];
                       return (
@@ -811,7 +816,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                           <span><strong>{capability.label}</strong><small>{capability.permission}</small></span>
                           <span className={capability.supported ? "support-mark supported" : "support-mark"}>
                             {capability.supported ? <Check size={15} /> : <X size={15} />}
-                            {capability.supported ? "可用" : "不可用"}
+                            {capability.supported ? c("可用", "Available") : c("不可用", "Unavailable")}
                           </span>
                         </div>
                       );
@@ -824,11 +829,11 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
           {activeView === "devices" ? (
             <section className="page-section" aria-labelledby="devices-heading">
-              <div className="page-heading"><div><span className="panel-kicker">设备台账</span><h1 id="devices-heading">实体设备</h1><p>每台硬件保留稳定身份、固件版本和调试历史。</p></div><button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />登记设备</button></div>
-              {devices.length === 0 ? <EmptyState icon={Cpu} title="还没有设备" body="先登记一台 STM32 设备，再开始连接和记录调试数据。" action={<button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />登记第一台设备</button>} /> : <div className="table-panel">
+              <div className="page-heading"><div><span className="panel-kicker">{c("设备台账", "Device registry")}</span><h1 id="devices-heading">{c("实体设备", "Physical devices")}</h1><p>{c("每台硬件保留稳定身份、固件版本和调试历史。", "Keep a stable identity, firmware history and debugging record for every device.")}</p></div><button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />{c("登记设备", "Register Device")}</button></div>
+              {devices.length === 0 ? <EmptyState icon={Cpu} title={c("还没有设备", "No devices yet")} body={c("先登记一台 STM32 设备，再开始连接和记录调试数据。", "Register an STM32 device before connecting and recording debugging data.")} action={<button className="primary-button" type="button" onClick={() => setDeviceDialogOpen(true)}><Plus size={17} />{c("登记第一台设备", "Register First Device")}</button>} /> : <div className="table-panel">
                 <table>
-                  <thead><tr><th>设备</th><th>主控</th><th>板卡</th><th>位置</th><th>当前固件</th><th>状态</th></tr></thead>
-                  <tbody>{devices.map((device) => <tr key={device.id} onClick={() => setSelectedDeviceId(device.id)}><td><strong>{device.name}</strong><small>{device.note || "—"}</small></td><td>{device.model || "—"}</td><td>{device.board || "—"}</td><td>{device.location || "—"}</td><td><span className="version-chip">{device.version || "未关联"}</span></td><td><span className={device.id === selectedDevice.id && connectionInfo ? "state-pill online" : "state-pill"}><span />{device.id === selectedDevice.id && connectionInfo ? "已连接" : "离线"}</span></td></tr>)}</tbody>
+                  <thead><tr><th>{c("设备", "Device")}</th><th>{c("主控", "MCU")}</th><th>{c("板卡", "Board")}</th><th>{c("位置", "Location")}</th><th>{c("当前固件", "Firmware")}</th><th>{c("状态", "Status")}</th></tr></thead>
+                  <tbody>{devices.map((device) => <tr key={device.id} onClick={() => setSelectedDeviceId(device.id)}><td><strong>{device.name}</strong><small>{device.note || "—"}</small></td><td>{device.model || "—"}</td><td>{device.board || "—"}</td><td>{device.location || "—"}</td><td><span className="version-chip">{device.version || c("未关联", "Not linked")}</span></td><td><span className={device.id === selectedDevice.id && connectionInfo ? "state-pill online" : "state-pill"}><span />{device.id === selectedDevice.id && connectionInfo ? c("已连接", "Connected") : c("离线", "Offline")}</span></td></tr>)}</tbody>
                 </table>
               </div>}
             </section>
@@ -836,37 +841,38 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
 
           {activeView === "firmware" ? (
             <section className="page-section" aria-labelledby="firmware-heading">
-              <div className="page-heading"><div><span className="panel-kicker">版本化管理</span><h1 id="firmware-heading">固件制品</h1><p>导入文件后计算 SHA-256，并完整保存到工作区数据库。</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? "正在校验" : "导入固件"}</button></div>
+              <div className="page-heading"><div><span className="panel-kicker">{c("版本化管理", "Versioned management")}</span><h1 id="firmware-heading">{c("固件制品", "Firmware artefacts")}</h1><p>{c("导入文件后计算 SHA-256，并完整保存到工作区数据库。", "Calculate SHA-256 on import and store the complete file in the workspace database.")}</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? c("正在校验", "Verifying…") : c("导入固件", "Import Firmware")}</button></div>
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
               <div className="artifact-grid">
                 {combinedFirmware.map((version) => (
                   <article className="artifact-card" key={version.id}>
                     <span className="artifact-icon"><FileCode2 size={21} /></span>
-                    <div className="artifact-main"><div><strong>{version.fileName}</strong>{version.isExample ? <span className="example-chip">示例</span> : <span className="saved-chip">已保存</span>}</div><p>{version.fileType} · {formatBytes(version.fileSize)}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                    <div className="artifact-main"><div><strong>{version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{c("已保存", "Saved")}</span>}</div><p>{version.fileType} · {formatBytes(version.fileSize)}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
                     <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
                   </article>
                 ))}
               </div>
-              <div className="notice-card"><ShieldCheck size={20} /><div><strong>制品不会被原地覆盖</strong><p>同名文件也会作为新版本保存。当前版本仅保存和校验文件，暂不执行烧录。</p></div></div>
+              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("制品不会被原地覆盖", "Artefacts are never overwritten in place")}</strong><p>{c("同名文件也会作为新版本保存。当前版本仅保存和校验文件，暂不执行烧录。", "Files with the same name are saved as new versions. This release stores and verifies files but does not flash them.")}</p></div></div>
             </section>
           ) : null}
 
           {activeView === "sessions" ? (
             <section className="page-section" aria-labelledby="sessions-heading">
-              <div className="page-heading"><div><span className="panel-kicker">调试账本</span><h1 id="sessions-heading">会话记录</h1><p>连接方式、设备、时间和全部事件属于同一次可追溯记录。</p></div></div>
-              {sessions.length === 0 ? <EmptyState icon={History} title="还没有已完成的会话" body="从调试台连接设备并开始记录，或先运行一次演示。" action={<button className="secondary-button" type="button" onClick={() => setActiveView("console")}>返回调试台</button>} /> : (
-                <div className="session-list">{sessions.map((session) => <article className="session-card" key={session.id}><span className="session-icon"><ListRestart size={20} /></span><div><div><strong>{session.deviceName}</strong>{session.isDemo ? <span className="example-chip">演示</span> : null}</div><p>{session.connectionLabel} · {session.eventCount} 条记录</p></div><time>{sessionDateFormatter.format(new Date(session.startedAt))}</time><span className="status-complete"><Check size={14} />已完成</span><button type="button" aria-label={`导出 ${session.deviceName} 会话`} onClick={() => void exportSession(session)}><Download size={17} /></button></article>)}</div>
+              <div className="page-heading"><div><span className="panel-kicker">{c("调试账本", "Debug ledger")}</span><h1 id="sessions-heading">{c("会话记录", "Session history")}</h1><p>{c("连接方式、设备、时间和全部事件属于同一次可追溯记录。", "Connection, device, timing and every event belong to one traceable record.")}</p></div></div>
+              {sessions.length === 0 ? <EmptyState icon={History} title={c("还没有已完成的会话", "No completed sessions yet")} body={c("从调试台连接设备并开始记录，或先运行一次演示。", "Connect a device and start recording, or run the demo first.")} action={<button className="secondary-button" type="button" onClick={() => setActiveView("console")}>{c("返回调试台", "Return to Workbench")}</button>} /> : (
+                <div className="session-list">{sessions.map((session) => <article className="session-card" key={session.id}><span className="session-icon"><ListRestart size={20} /></span><div><div><strong>{session.deviceName}</strong>{session.isDemo ? <span className="example-chip">{c("演示", "Demo")}</span> : null}</div><p>{session.connectionLabel} · {c(`${session.eventCount} 条记录`, `${session.eventCount} records`)}</p></div><time>{sessionDateFormatter.format(new Date(session.startedAt))}</time><span className="status-complete"><Check size={14} />{c("已完成", "Complete")}</span><button type="button" aria-label={c(`导出 ${session.deviceName} 会话`, `Export ${session.deviceName} session`)} onClick={() => void exportSession(session)}><Download size={17} /></button></article>)}</div>
               )}
             </section>
           ) : null}
           {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} proAccess={planAccess.pro} /> : null}
+          </div>
         </main>
       </div>
 
       {connectionDialogOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connecting) setConnectionDialogOpen(false); }}>
           <section className="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-title">
-            <div className="dialog-heading"><div><span className="panel-kicker">连接设备</span><h2 id="connection-title">选择连接方式</h2><p>浏览器只会访问你在系统选择器中明确授权的设备。</p></div><button type="button" aria-label="关闭连接窗口" disabled={Boolean(connecting)} onClick={() => setConnectionDialogOpen(false)}><X size={20} /></button></div>
+            <div className="dialog-heading"><div><span className="panel-kicker">{c("连接设备", "Connect device")}</span><h2 id="connection-title">{c("选择连接方式", "Choose a connection")}</h2><p>{c("浏览器只会访问你在系统选择器中明确授权的设备。", "The browser accesses only devices you explicitly authorise in the system picker.")}</p></div><button type="button" aria-label={c("关闭连接窗口", "Close connection dialog")} disabled={Boolean(connecting)} onClick={() => setConnectionDialogOpen(false)}><X size={20} /></button></div>
             <div className="connection-options">
               {capabilities.map((capability) => {
                 const Icon = capabilityIcons[capability.id];
@@ -875,26 +881,26 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   <button key={capability.id} className={selected ? "connection-option selected" : "connection-option"} type="button" disabled={!capability.supported || Boolean(connecting)} onClick={() => setSelectedCapability(capability.id)}>
                     <span className="connection-option-icon"><Icon size={20} /></span>
                     <span><strong>{capability.label}</strong><small>{capability.description}</small></span>
-                    <span className={capability.supported ? "option-status" : "option-status unavailable"}>{capability.supported ? capability.permission : "不可用"}</span>
+                    <span className={capability.supported ? "option-status" : "option-status unavailable"}>{capability.supported ? capability.permission : c("不可用", "Unavailable")}</span>
                   </button>
                 );
               })}
             </div>
             {selectedCapability === "network" ? (
-              <label className="network-field"><span>设备地址</span><input type="url" value={networkUrl} onChange={(event) => setNetworkUrl(event.target.value)} placeholder="http://192.168.1.50/health" /><small>设备需要提供可跨域访问的 HTTP 健康检查地址。</small></label>
+              <label className="network-field"><span>{c("设备地址", "Device address")}</span><input type="url" inputMode="url" value={networkUrl} onChange={(event) => setNetworkUrl(event.target.value)} placeholder="http://192.168.1.50/health" /><small>{c("设备需要提供可跨域访问的 HTTP 健康检查地址。", "The device must expose an HTTP health endpoint that allows cross-origin access.")}</small></label>
             ) : null}
             {selectedCapability === "serial" ? (
-              <div className="serial-settings" aria-label="串口参数">
-                <div className="serial-channel"><span>端口通道</span><strong>下一步在系统选择器中选择 COM / tty 端口</strong></div>
-                <label><span>波特率</span><select value={serialBaudRate} onChange={(event) => setSerialBaudRate(event.target.value)}>{commonBaudRates.map((rate) => <option key={rate} value={rate}>{rate}</option>)}<option value="custom">自定义</option></select></label>
-                {serialBaudRate === "custom" ? <label><span>自定义波特率</span><input type="number" min="300" max="4000000" step="1" value={customBaudRate} onChange={(event) => setCustomBaudRate(event.target.value)} /></label> : null}
-                <label><span>数据位</span><select value={serialDataBits} onChange={(event) => setSerialDataBits(Number(event.target.value) as 7 | 8)}><option value="8">8</option><option value="7">7</option></select></label>
-                <label><span>校验位</span><select value={serialParity} onChange={(event) => setSerialParity(event.target.value as SerialConnectionOptions["parity"])}><option value="none">无</option><option value="even">偶校验</option><option value="odd">奇校验</option></select></label>
-                <label><span>停止位</span><select value={serialStopBits} onChange={(event) => setSerialStopBits(Number(event.target.value) as 1 | 2)}><option value="1">1</option><option value="2">2</option></select></label>
-                <label><span>流控</span><select value={serialFlowControl} onChange={(event) => setSerialFlowControl(event.target.value as SerialConnectionOptions["flowControl"])}><option value="none">无</option><option value="hardware">硬件 RTS/CTS</option></select></label>
+              <div className="serial-settings" aria-label={c("串口参数", "Serial settings")}>
+                <div className="serial-channel"><span>{c("端口通道", "Port")}</span><strong>{c("下一步在系统选择器中选择 COM / tty 端口", "Choose a COM / tty port in the system picker next")}</strong></div>
+                <label><span>{c("波特率", "Baud rate")}</span><select value={serialBaudRate} onChange={(event) => setSerialBaudRate(event.target.value)}>{commonBaudRates.map((rate) => <option key={rate} value={rate}>{rate}</option>)}<option value="custom">{c("自定义", "Custom")}</option></select></label>
+                {serialBaudRate === "custom" ? <label><span>{c("自定义波特率", "Custom baud rate")}</span><input type="number" min="300" max="4000000" step="1" value={customBaudRate} onChange={(event) => setCustomBaudRate(event.target.value)} /></label> : null}
+                <label><span>{c("数据位", "Data bits")}</span><select value={serialDataBits} onChange={(event) => setSerialDataBits(Number(event.target.value) as 7 | 8)}><option value="8">8</option><option value="7">7</option></select></label>
+                <label><span>{c("校验位", "Parity")}</span><select value={serialParity} onChange={(event) => setSerialParity(event.target.value as SerialConnectionOptions["parity"])}><option value="none">{c("无", "None")}</option><option value="even">{c("偶校验", "Even")}</option><option value="odd">{c("奇校验", "Odd")}</option></select></label>
+                <label><span>{c("停止位", "Stop bits")}</span><select value={serialStopBits} onChange={(event) => setSerialStopBits(Number(event.target.value) as 1 | 2)}><option value="1">1</option><option value="2">2</option></select></label>
+                <label><span>{c("流控", "Flow control")}</span><select value={serialFlowControl} onChange={(event) => setSerialFlowControl(event.target.value as SerialConnectionOptions["flowControl"])}><option value="none">{c("无", "None")}</option><option value="hardware">{c("硬件 RTS/CTS", "Hardware RTS/CTS")}</option></select></label>
               </div>
             ) : null}
-            <div className="dialog-footer"><div>{activeCapability ? <><CircleAlert size={16} /><span>{activeCapability.id === "network" ? "首次访问局域网时，浏览器会请求网络权限。" : "下一步将打开浏览器的系统设备选择器。"}</span></> : <span>选择一种方式继续</span>}</div><button className="primary-button" type="button" disabled={!selectedCapability || Boolean(connecting)} onClick={() => selectedCapability && void connectHardware(selectedCapability)}>{connecting ? <Loader2 size={17} className="spinning" /> : <Plug size={17} />}{connecting ? "正在连接" : "继续连接"}</button></div>
+            <div className="dialog-footer"><div>{activeCapability ? <><CircleAlert size={16} /><span>{activeCapability.id === "network" ? c("首次访问局域网时，浏览器会请求网络权限。", "The browser will request local-network permission on first access.") : c("下一步将打开浏览器的系统设备选择器。", "The browser's system device picker opens next.")}</span></> : <span>{c("选择一种方式继续", "Choose a connection to continue")}</span>}</div><button className="primary-button" type="button" disabled={!selectedCapability || Boolean(connecting)} onClick={() => selectedCapability && void connectHardware(selectedCapability)}>{connecting ? <Loader2 size={17} className="spinning" /> : <Plug size={17} />}{connecting ? c("正在连接", "Connecting…") : c("继续连接", "Continue")}</button></div>
           </section>
         </div>
       ) : null}
@@ -902,18 +908,18 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       {deviceDialogOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deviceBusy) setDeviceDialogOpen(false); }}>
           <form className="connection-dialog device-form" role="dialog" aria-modal="true" aria-labelledby="device-form-title" onSubmit={(event) => void submitDevice(event)}>
-            <div className="dialog-heading"><div><span className="panel-kicker">设备台账</span><h2 id="device-form-title">登记设备</h2><p>填写能帮助你识别和定位这台硬件的信息。</p></div><button type="button" aria-label="关闭" disabled={deviceBusy} onClick={() => setDeviceDialogOpen(false)}><X size={20} /></button></div>
+            <div className="dialog-heading"><div><span className="panel-kicker">{c("设备台账", "Device registry")}</span><h2 id="device-form-title">{c("登记设备", "Register Device")}</h2><p>{c("填写能帮助你识别和定位这台硬件的信息。", "Add details that help you identify and locate this hardware.")}</p></div><button type="button" aria-label={c("关闭", "Close")} disabled={deviceBusy} onClick={() => setDeviceDialogOpen(false)}><X size={20} /></button></div>
             <div className="device-form-grid">
-              <label><span>设备名称</span><input name="name" required maxLength={160} placeholder="例如：环境监测主控 A-07" /></label>
-              <label><span>MCU 型号</span><input name="model" maxLength={120} placeholder="STM32H743VIT6" /></label>
-              <label><span>板卡</span><input name="board" maxLength={120} placeholder="环境传感器主板 R3" /></label>
-              <label><span>位置</span><input name="location" maxLength={160} placeholder="工作台 01" /></label>
-              <label><span>时钟</span><input name="clock" maxLength={80} placeholder="400 MHz" /></label>
+              <label><span>{c("设备名称", "Device name")}</span><input name="name" required maxLength={160} placeholder={c("例如：环境监测主控 A-07", "e.g. Environment Controller A-07")} /></label>
+              <label><span>{c("MCU 型号", "MCU model")}</span><input name="model" maxLength={120} placeholder="STM32H743VIT6" /></label>
+              <label><span>{c("板卡", "Board")}</span><input name="board" maxLength={120} placeholder={c("环境传感器主板 R3", "Environment Sensor Board R3")} /></label>
+              <label><span>{c("位置", "Location")}</span><input name="location" maxLength={160} placeholder={c("工作台 01", "Bench 01")} /></label>
+              <label><span>{c("时钟", "Clock")}</span><input name="clock" maxLength={80} placeholder="400 MHz" /></label>
               <label><span>Flash</span><input name="flash" maxLength={80} placeholder="2048 KB" /></label>
-              <label><span>当前固件</span><input name="version" maxLength={120} placeholder="v0.8.4" /></label>
-              <label><span>备注</span><input name="note" maxLength={1000} placeholder="用途或硬件状态" /></label>
+              <label><span>{c("当前固件", "Current firmware")}</span><input name="version" maxLength={120} placeholder="v0.8.4" /></label>
+              <label><span>{c("备注", "Notes")}</span><input name="note" maxLength={1000} placeholder={c("用途或硬件状态", "Purpose or hardware status")} /></label>
             </div>
-            <div className="dialog-footer"><span>保存后可直接选择此设备开始调试。</span><button className="primary-button" type="submit" disabled={deviceBusy}>{deviceBusy ? <Loader2 size={17} className="spinning" /> : <Plus size={17} />}{deviceBusy ? "正在保存" : "保存设备"}</button></div>
+            <div className="dialog-footer"><span>{c("保存后可直接选择此设备开始调试。", "After saving, select this device and start debugging.")}</span><button className="primary-button" type="submit" disabled={deviceBusy}>{deviceBusy ? <Loader2 size={17} className="spinning" /> : <Plus size={17} />}{deviceBusy ? c("正在保存", "Saving…") : c("保存设备", "Save Device")}</button></div>
           </form>
         </div>
       ) : null}

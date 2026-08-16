@@ -102,37 +102,41 @@ const ECB02_GATT = {
   write: 0xfff2,
 } as const;
 
+function browserCopy(zh: string, en: string): string {
+  return typeof navigator !== "undefined" && !navigator.languages.some((language) => language.toLowerCase().startsWith("zh")) ? en : zh;
+}
+
 const capabilityDefinitions: Array<Omit<HardwareCapability, "supported" | "permission">> = [
   {
     id: "serial",
-    label: "串口",
-    description: "选择端口并设置串口参数",
+    label: browserCopy("串口", "Serial"),
+    description: browserCopy("选择端口并设置串口参数", "Choose a port and configure serial parameters"),
   },
   {
     id: "usb",
     label: "USB",
-    description: "识别并授权 STM32 USB 设备",
+    description: browserCopy("识别并授权 STM32 USB 设备", "Detect and authorise an STM32 USB device"),
   },
   {
     id: "hid",
-    label: "调试探针",
-    description: "识别并授权 HID 调试探针",
+    label: browserCopy("调试探针", "Debug Probe"),
+    description: browserCopy("识别并授权 HID 调试探针", "Detect and authorise a HID debug probe"),
   },
   {
     id: "bluetooth",
-    label: "蓝牙",
-    description: "BLE GATT 与设备配网",
+    label: browserCopy("蓝牙", "Bluetooth"),
+    description: browserCopy("BLE GATT 与设备配网", "BLE GATT and device provisioning"),
   },
   {
     id: "network",
-    label: "Wi-Fi / 局域网",
-    description: "通过设备地址访问 HTTP 接口",
+    label: browserCopy("Wi-Fi / 局域网", "Wi-Fi / Local Network"),
+    description: browserCopy("通过设备地址访问 HTTP 接口", "Access an HTTP endpoint at the device address"),
   },
 ];
 
 async function inspectLocalNetworkPermission(): Promise<string> {
   if (!("permissions" in navigator)) {
-    return "连接时检查";
+    return browserCopy("连接时检查", "Checked on connection");
   }
 
   try {
@@ -140,11 +144,11 @@ async function inspectLocalNetworkPermission(): Promise<string> {
       descriptor: { name: string },
     ) => Promise<PermissionStatus>;
     const status = await query({ name: "local-network" });
-    if (status.state === "granted") return "已允许";
-    if (status.state === "denied") return "已阻止";
-    return "连接时询问";
+    if (status.state === "granted") return browserCopy("已允许", "Allowed");
+    if (status.state === "denied") return browserCopy("已阻止", "Blocked");
+    return browserCopy("连接时询问", "Ask on connection");
   } catch {
-    return "连接时检查";
+    return browserCopy("连接时检查", "Checked on connection");
   }
 }
 
@@ -165,14 +169,14 @@ export async function inspectHardwareCapabilities(): Promise<HardwareCapability[
         definition.id === "network"
           ? localNetworkPermission
           : supported
-            ? "使用时授权"
-            : "当前浏览器不可用",
+            ? browserCopy("使用时授权", "Authorised when used")
+            : browserCopy("当前浏览器不可用", "Unavailable in this browser"),
     };
   });
 }
 
 function hexadecimal(value?: number): string {
-  return value === undefined ? "未知" : `0x${value.toString(16).padStart(4, "0").toUpperCase()}`;
+  return value === undefined ? browserCopy("未知", "Unknown") : `0x${value.toString(16).padStart(4, "0").toUpperCase()}`;
 }
 
 export async function requestHardwareConnection(
@@ -186,7 +190,7 @@ export async function requestHardwareConnection(
   const hardwareNavigator = navigator as HardwareNavigator;
 
   if (kind === "serial") {
-    if (!hardwareNavigator.serial) throw new Error("当前浏览器不支持串口访问");
+    if (!hardwareNavigator.serial) throw new Error(browserCopy("当前浏览器不支持串口访问", "This browser does not support serial access"));
     const port = await hardwareNavigator.serial.requestPort();
     const serial = options.serial ?? {
       baudRate: 115200,
@@ -211,7 +215,7 @@ export async function requestHardwareConnection(
           }
         } catch (error) {
           if (!closed) {
-            options.onSerialText?.(`\n[串口读取中断] ${error instanceof Error ? error.message : "未知错误"}`);
+            options.onSerialText?.(`\n[${browserCopy("串口读取中断", "Serial read interrupted")}] ${error instanceof Error ? error.message : browserCopy("未知错误", "Unknown error")}`);
           }
         } finally {
           reader?.releaseLock();
@@ -222,8 +226,8 @@ export async function requestHardwareConnection(
     const info = port.getInfo?.() ?? {};
     return {
       kind,
-      name: "串口设备",
-      detail: `VID ${hexadecimal(info.usbVendorId)} · PID ${hexadecimal(info.usbProductId)} · ${serial.baudRate} baud · ${serial.dataBits}${serial.parity === "none" ? "N" : serial.parity === "even" ? "E" : "O"}${serial.stopBits}${serial.flowControl === "hardware" ? " · 硬件流控" : ""}`,
+      name: browserCopy("串口设备", "Serial device"),
+      detail: `VID ${hexadecimal(info.usbVendorId)} · PID ${hexadecimal(info.usbProductId)} · ${serial.baudRate} baud · ${serial.dataBits}${serial.parity === "none" ? "N" : serial.parity === "even" ? "E" : "O"}${serial.stopBits}${serial.flowControl === "hardware" ? browserCopy(" · 硬件流控", " · Hardware flow control") : ""}`,
       close: async () => {
         closed = true;
         await reader?.cancel().catch(() => undefined);
@@ -233,40 +237,40 @@ export async function requestHardwareConnection(
   }
 
   if (kind === "usb") {
-    if (!hardwareNavigator.usb) throw new Error("当前浏览器不支持 USB 设备访问");
+    if (!hardwareNavigator.usb) throw new Error(browserCopy("当前浏览器不支持 USB 设备访问", "This browser does not support USB device access"));
     const device = await hardwareNavigator.usb.requestDevice({
       filters: [{ vendorId: 0x0483 }, { vendorId: 0x0d28 }],
     });
     if (!device.opened) await device.open();
     return {
       kind,
-      name: device.productName || "STM32 USB 设备",
+      name: device.productName || browserCopy("STM32 USB 设备", "STM32 USB device"),
       detail: `VID ${hexadecimal(device.vendorId)} · PID ${hexadecimal(device.productId)}${device.serialNumber ? ` · ${device.serialNumber}` : ""}`,
       close: () => device.close(),
     };
   }
 
   if (kind === "hid") {
-    if (!hardwareNavigator.hid) throw new Error("当前浏览器不支持 HID 设备访问");
+    if (!hardwareNavigator.hid) throw new Error(browserCopy("当前浏览器不支持 HID 设备访问", "This browser does not support HID device access"));
     const devices = await hardwareNavigator.hid.requestDevice({ filters: [] });
     const device = devices[0];
-    if (!device) throw new Error("没有选择调试探针");
+    if (!device) throw new Error(browserCopy("没有选择调试探针", "No debug probe was selected"));
     if (!device.opened) await device.open();
     return {
       kind,
-      name: device.productName || "HID 调试探针",
+      name: device.productName || browserCopy("HID 调试探针", "HID debug probe"),
       detail: `VID ${hexadecimal(device.vendorId)} · PID ${hexadecimal(device.productId)}`,
       close: () => device.close(),
     };
   }
 
   if (kind === "bluetooth") {
-    if (!hardwareNavigator.bluetooth) throw new Error("当前浏览器不支持蓝牙访问");
+    if (!hardwareNavigator.bluetooth) throw new Error(browserCopy("当前浏览器不支持蓝牙访问", "This browser does not support Bluetooth access"));
     const device = await hardwareNavigator.bluetooth.requestDevice({
       acceptAllDevices: true,
       optionalServices: [ECB02_GATT.service],
     });
-    if (!device.gatt) throw new Error("所选设备没有可用的 BLE GATT 服务");
+    if (!device.gatt) throw new Error(browserCopy("所选设备没有可用的 BLE GATT 服务", "The selected device does not expose a usable BLE GATT service"));
 
     let server: BluetoothServerLike | undefined;
     let notifyCharacteristic: BluetoothCharacteristicLike | undefined;
@@ -288,8 +292,8 @@ export async function requestHardwareConnection(
 
       return {
         kind,
-        name: device.name || "ECB02 蓝牙设备",
-        detail: "蓝牙数据通道已连接",
+        name: device.name || browserCopy("ECB02 蓝牙设备", "ECB02 Bluetooth device"),
+        detail: browserCopy("蓝牙数据通道已连接", "Bluetooth data channel connected"),
         write: async (data) => {
           const bytes = typeof data === "string"
             ? new TextEncoder().encode(data)
@@ -302,7 +306,7 @@ export async function requestHardwareConnection(
             await writeCharacteristic.writeValue(bytes);
             return;
           }
-          throw new Error("小车蓝牙写入通道不可用");
+          throw new Error(browserCopy("小车蓝牙写入通道不可用", "The vehicle Bluetooth write channel is unavailable"));
         },
         close: async () => {
           if (handleNotification) {
@@ -317,17 +321,17 @@ export async function requestHardwareConnection(
       server?.disconnect();
       device.gatt.disconnect();
       if (error instanceof DOMException && error.name === "NotFoundError") {
-        throw new Error("所选设备没有 ECB02 默认蓝牙通道，请确认小车蓝牙已开启且模块 UUID 为 FFF0/FFF1/FFF2");
+        throw new Error(browserCopy("所选设备没有 ECB02 默认蓝牙通道，请确认小车蓝牙已开启且模块 UUID 为 FFF0/FFF1/FFF2", "The selected device does not expose the default ECB02 channel. Confirm Bluetooth is enabled and the module UUIDs are FFF0/FFF1/FFF2."));
       }
       throw error;
     }
   }
 
   const urlText = options.networkUrl?.trim();
-  if (!urlText) throw new Error("请输入设备的局域网地址");
+  if (!urlText) throw new Error(browserCopy("请输入设备的局域网地址", "Enter the device's local-network address"));
   const url = new URL(urlText);
   if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error("设备地址必须使用 HTTP 或 HTTPS");
+    throw new Error(browserCopy("设备地址必须使用 HTTP 或 HTTPS", "The device address must use HTTP or HTTPS"));
   }
 
   const controller = new AbortController();
@@ -342,13 +346,13 @@ export async function requestHardwareConnection(
         targetAddressSpace: "local",
       } as RequestInit,
     );
-    if (!response.ok) throw new Error(`设备返回 ${response.status}`);
+    if (!response.ok) throw new Error(browserCopy(`设备返回 ${response.status}`, `Device returned ${response.status}`));
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("连接设备超时，请检查地址和设备网络状态");
+      throw new Error(browserCopy("连接设备超时，请检查地址和设备网络状态", "The device connection timed out. Check the address and device network status."));
     }
-    if (error instanceof Error && error.message.startsWith("设备返回")) throw error;
-    throw new Error("无法访问设备；请确认地址、局域网权限和设备 CORS 配置");
+    if (error instanceof Error && (error.message.startsWith("设备返回") || error.message.startsWith("Device returned"))) throw error;
+    throw new Error(browserCopy("无法访问设备；请确认地址、局域网权限和设备 CORS 配置", "The device could not be reached. Check the address, local-network permission and device CORS settings."));
   } finally {
     window.clearTimeout(timeout);
   }
@@ -356,7 +360,7 @@ export async function requestHardwareConnection(
   return {
     kind,
     name: url.hostname,
-    detail: `已验证 ${url.origin}`,
+    detail: browserCopy(`已验证 ${url.origin}`, `Verified ${url.origin}`),
     close: async () => undefined,
   };
 }

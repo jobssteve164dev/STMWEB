@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import AuthenticatedApp from "./AuthenticatedApp.js";
 import { LandingPage, LegalPage, NotFoundPage, PlansPage } from "./PublicSite.js";
+import { LocaleProvider } from "./i18n.js";
 import "./styles.css";
 
 function CurrentRoute() {
@@ -16,6 +17,6 @@ function CurrentRoute() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <CurrentRoute />
+    <LocaleProvider><CurrentRoute /></LocaleProvider>
   </StrictMode>,
 );

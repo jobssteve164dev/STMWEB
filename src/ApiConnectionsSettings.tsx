@@ -1,5 +1,6 @@
 import { ArrowRight, Check, Clipboard, KeyRound, Loader2, LockKeyhole, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useLocale } from "./i18n.js";
 
 type ApiScope = "devices:read" | "devices:control" | "debug:read" | "debug:execute" |
   "runners:read" | "runners:manage" | "builds:read" | "builds:create" | "builds:cancel" | "artifacts:read";
@@ -25,17 +26,17 @@ interface ApiActivity {
   occurredAt: string;
 }
 
-const scopeGroups: Array<{ id: ApiScope; label: string }> = [
-  { id: "devices:read", label: "查看设备" },
-  { id: "devices:control", label: "登记设备" },
-  { id: "debug:read", label: "查看调试记录" },
-  { id: "debug:execute", label: "写入调试记录" },
-  { id: "runners:read", label: "查看编译算力" },
-  { id: "runners:manage", label: "接入编译算力" },
-  { id: "builds:read", label: "查看固件构建" },
-  { id: "builds:create", label: "创建固件构建" },
-  { id: "builds:cancel", label: "取消固件构建" },
-  { id: "artifacts:read", label: "下载构建制品" },
+const scopeGroups: Array<{ id: ApiScope; zh: string; en: string }> = [
+  { id: "devices:read", zh: "查看设备", en: "View devices" },
+  { id: "devices:control", zh: "登记设备", en: "Register devices" },
+  { id: "debug:read", zh: "查看调试记录", en: "View debugging records" },
+  { id: "debug:execute", zh: "写入调试记录", en: "Write debugging records" },
+  { id: "runners:read", zh: "查看编译算力", en: "View build runners" },
+  { id: "runners:manage", zh: "接入编译算力", en: "Connect build runners" },
+  { id: "builds:read", zh: "查看固件构建", en: "View firmware builds" },
+  { id: "builds:create", zh: "创建固件构建", en: "Create firmware builds" },
+  { id: "builds:cancel", zh: "取消固件构建", en: "Cancel firmware builds" },
+  { id: "artifacts:read", zh: "下载构建制品", en: "Download build artefacts" },
 ];
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -45,11 +46,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   const body = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "API 连接操作未完成");
+  const fallbackError = navigator.languages.some((language) => language.toLowerCase().startsWith("zh")) ? "API 连接操作未完成" : "The API connection action did not complete";
+  if (!response.ok) throw new Error(body.error || fallbackError);
   return body;
 }
 
 export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEmail: string; proAccess: boolean }) {
+  const { isEnglish, locale } = useLocale();
+  const c = (zh: string, en: string) => isEnglish ? en : zh;
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [activity, setActivity] = useState<ApiActivity[]>([]);
   const [credential, setCredential] = useState<string | null>(null);
@@ -64,8 +68,8 @@ export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEma
   }, []);
 
   useEffect(() => {
-    if (proAccess) void load().catch((reason) => setError(reason instanceof Error ? reason.message : "API 连接暂时无法读取"));
-  }, [load, proAccess]);
+    if (proAccess) void load().catch((reason) => setError(reason instanceof Error ? reason.message : c("API 连接暂时无法读取", "API connections are temporarily unavailable")));
+  }, [isEnglish, load, proAccess]);
 
   async function perform(action: () => Promise<{ credential?: string } | unknown>) {
     setBusy(true);
@@ -75,14 +79,14 @@ export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEma
       if (result.credential) { setCredential(result.credential); setCopied(false); }
       await load();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "操作没有完成");
+      setError(reason instanceof Error ? reason.message : c("操作没有完成", "The action did not complete"));
     } finally { setBusy(false); }
   }
 
   return (
     <section className="page-section api-settings" aria-labelledby="api-settings-heading">
-      <div className="page-heading"><div><span className="panel-kicker">账户设置</span><h1 id="api-settings-heading">API 连接</h1><p>把你的硬件工作台接到自己信任的工具。每个连接只代表当前账户，并且可以随时撤销。</p></div></div>
-      {!proAccess ? <div className="settings-pro-gate"><span><LockKeyhole size={22} /></span><div><strong>API 自动化属于 Pro 计划</strong><p>你仍可免费使用浏览器连接、动态调试台和工程记录。升级后才能创建可轮换、可撤销的外部工具连接。</p></div><a className="primary-button" href="/plans">比较计划 <ArrowRight size={16} /></a></div> : null}
+      <div className="page-heading"><div><span className="panel-kicker">{c("账户设置", "Account settings")}</span><h1 id="api-settings-heading">{c("API 连接", "API Connections")}</h1><p>{c("把你的硬件工作台接到自己信任的工具。每个连接只代表当前账户，并且可以随时撤销。", "Connect your hardware workbench to tools you trust. Each connection represents this account only and can be revoked at any time.")}</p></div></div>
+      {!proAccess ? <div className="settings-pro-gate"><span><LockKeyhole size={22} /></span><div><strong>{c("API 自动化属于 Pro 计划", "API automation is included in Pro")}</strong><p>{c("你仍可免费使用浏览器连接、动态调试台和工程记录。升级后才能创建可轮换、可撤销的外部工具连接。", "Browser connectivity, the dynamic workbench and engineering records remain free. Upgrade to create rotatable and revocable external tool connections.")}</p></div><a className="primary-button" href="/plans">{c("比较计划", "Compare Plans")} <ArrowRight size={16} /></a></div> : null}
       {proAccess ? <>
       {error ? <div className="api-error" role="alert">{error}</div> : null}
       <form className="api-connection-form" onSubmit={(event) => {
@@ -96,20 +100,20 @@ export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEma
           return result;
         });
       }}>
-        <div className="api-form-copy"><span><KeyRound size={17} />新连接</span><h2>连接你的调用工具</h2><p>为不同工具分别创建连接，之后可以单独轮换或撤销。</p></div>
-        <label><span>连接名称</span><input name="name" required maxLength={120} placeholder="例如：我的硬件助手" /></label>
-        <label><span>用途说明</span><input name="purpose" required maxLength={500} placeholder="例如：查看设备并发起固件构建" /></label>
-        <fieldset><legend>允许它完成</legend>{scopeGroups.map((scope) => <label key={scope.id}><input name={scope.id} type="checkbox" defaultChecked />{scope.label}</label>)}</fieldset>
-        <button className="primary-button" type="submit" disabled={busy}>{busy ? <Loader2 className="spinning" size={17} /> : <KeyRound size={17} />}{busy ? "正在创建" : "创建 API 连接"}</button>
+        <div className="api-form-copy"><span><KeyRound size={17} />{c("新连接", "New connection")}</span><h2>{c("连接你的调用工具", "Connect a Tool")}</h2><p>{c("为不同工具分别创建连接，之后可以单独轮换或撤销。", "Create a separate connection for each tool so you can rotate or revoke it independently.")}</p></div>
+        <label><span>{c("连接名称", "Connection name")}</span><input name="name" required maxLength={120} placeholder={c("例如：我的硬件助手", "e.g. My Hardware Assistant")} /></label>
+        <label><span>{c("用途说明", "Purpose")}</span><input name="purpose" required maxLength={500} placeholder={c("例如：查看设备并发起固件构建", "e.g. View devices and start firmware builds")} /></label>
+        <fieldset><legend>{c("允许它完成", "Allow this connection to")}</legend>{scopeGroups.map((scope) => <label key={scope.id}><input name={scope.id} type="checkbox" defaultChecked />{isEnglish ? scope.en : scope.zh}</label>)}</fieldset>
+        <button className="primary-button" type="submit" disabled={busy}>{busy ? <Loader2 className="spinning" size={17} /> : <KeyRound size={17} />}{busy ? c("正在创建", "Creating…") : c("创建 API 连接", "Create API Connection")}</button>
       </form>
-      {credential ? <div className="credential-reveal" role="status"><div><strong>请现在保存凭证</strong><p>这是唯一一次显示。只交给你信任的调用工具；丢失后请轮换。</p></div><code>{credential}</code><button className="secondary-button" type="button" onClick={() => void navigator.clipboard.writeText(credential).then(() => setCopied(true))}>{copied ? <Check size={16} /> : <Clipboard size={16} />}{copied ? "已复制" : "复制凭证"}</button><button className="text-button" type="button" onClick={() => setCredential(null)}>我已保存</button></div> : null}
+      {credential ? <div className="credential-reveal" role="status"><div><strong>{c("请现在保存凭证", "Save this credential now")}</strong><p>{c("这是唯一一次显示。只交给你信任的调用工具；丢失后请轮换。", "This is the only time it will be shown. Share it only with a trusted tool; rotate it if lost.")}</p></div><code>{credential}</code><button className="secondary-button" type="button" onClick={() => void navigator.clipboard.writeText(credential).then(() => setCopied(true))}>{copied ? <Check size={16} /> : <Clipboard size={16} />}{copied ? c("已复制", "Copied") : c("复制凭证", "Copy Credential")}</button><button className="text-button" type="button" onClick={() => setCredential(null)}>{c("我已保存", "I've Saved It")}</button></div> : null}
       <div className="api-connection-list">{connections.length ? connections.map((connection) => <article key={connection.id} className={connection.status === "revoked" ? "revoked" : ""}>
-        <header><div><span className={connection.status === "active" ? "state-pill online" : "state-pill"}><span />{connection.status === "active" ? "可用" : "已撤销"}</span><h3>{connection.name}</h3><p>{connection.purpose}</p></div><small>凭证尾号 · {connection.credentialHint}</small></header>
-        <ul>{connection.scopes.map((scope) => <li key={scope}>{scopeGroups.find((item) => item.id === scope)?.label ?? scope}</li>)}</ul>
-        <footer><span>{connection.lastUsedAt ? `最近使用 ${new Date(connection.lastUsedAt).toLocaleString("zh-CN")}` : `创建于 ${new Date(connection.createdAt).toLocaleString("zh-CN")}`}</span>{connection.status === "active" ? <div><button className="secondary-button" type="button" disabled={busy} onClick={() => { if (window.confirm("轮换后旧凭证会立即失效。确定继续吗？")) void perform(() => request(`/${connection.id}/rotate`, { method: "POST", body: "{}" })); }}><RefreshCw size={15} />轮换</button><button className="danger-button" type="button" disabled={busy} onClick={() => { if (window.confirm("撤销后这个工具会立即失去访问权限，已有设备、记录和构建不会被删除。")) void perform(() => request(`/${connection.id}/revoke`, { method: "POST", body: "{}" })); }}><Trash2 size={15} />撤销</button></div> : null}</footer>
-      </article>) : <div className="empty-state"><span className="empty-icon"><KeyRound size={25} /></span><strong>还没有 API 连接</strong><p>创建后，你可以把凭证交给自己信任的调用工具。</p></div>}</div>
-      <section className="api-activity"><h2>最近调用</h2>{activity.length ? <ol>{activity.map((item) => <li key={item.id}><span className={item.outcome}>{item.outcome === "succeeded" ? "成功" : "失败"}</span><strong>{connections.find((connection) => connection.id === item.connectionId)?.name ?? "已撤销连接"}</strong><small>{item.action} · {new Date(item.occurredAt).toLocaleString("zh-CN")}</small></li>)}</ol> : <p>调用工具使用连接后，这里会出现操作记录。</p>}</section>
-      <p className="api-account-note"><ShieldCheck size={16} />这些连接属于 {accountEmail}，不能切换到其他账户，也不会获得你的登录密码。</p>
+        <header><div><span className={connection.status === "active" ? "state-pill online" : "state-pill"}><span />{connection.status === "active" ? c("可用", "Active") : c("已撤销", "Revoked")}</span><h3>{connection.name}</h3><p>{connection.purpose}</p></div><small>{c("凭证尾号", "Credential ending")} · {connection.credentialHint}</small></header>
+        <ul>{connection.scopes.map((scope) => { const item = scopeGroups.find((candidate) => candidate.id === scope); return <li key={scope}>{item ? (isEnglish ? item.en : item.zh) : scope}</li>; })}</ul>
+        <footer><span>{connection.lastUsedAt ? c(`最近使用 ${new Date(connection.lastUsedAt).toLocaleString(locale)}`, `Last used ${new Date(connection.lastUsedAt).toLocaleString(locale)}`) : c(`创建于 ${new Date(connection.createdAt).toLocaleString(locale)}`, `Created ${new Date(connection.createdAt).toLocaleString(locale)}`)}</span>{connection.status === "active" ? <div><button className="secondary-button" type="button" disabled={busy} onClick={() => { if (window.confirm(c("轮换后旧凭证会立即失效。确定继续吗？", "The old credential will stop working immediately. Continue?"))) void perform(() => request(`/${connection.id}/rotate`, { method: "POST", body: "{}" })); }}><RefreshCw size={15} />{c("轮换", "Rotate")}</button><button className="danger-button" type="button" disabled={busy} onClick={() => { if (window.confirm(c("撤销后这个工具会立即失去访问权限，已有设备、记录和构建不会被删除。", "This tool will immediately lose access. Existing devices, records and builds will not be deleted."))) void perform(() => request(`/${connection.id}/revoke`, { method: "POST", body: "{}" })); }}><Trash2 size={15} />{c("撤销", "Revoke")}</button></div> : null}</footer>
+      </article>) : <div className="empty-state"><span className="empty-icon"><KeyRound size={25} /></span><strong>{c("还没有 API 连接", "No API connections yet")}</strong><p>{c("创建后，你可以把凭证交给自己信任的调用工具。", "Create one, then give the credential to a tool you trust.")}</p></div>}</div>
+      <section className="api-activity"><h2>{c("最近调用", "Recent Activity")}</h2>{activity.length ? <ol>{activity.map((item) => <li key={item.id}><span className={item.outcome}>{item.outcome === "succeeded" ? c("成功", "Succeeded") : c("失败", "Failed")}</span><strong>{connections.find((connection) => connection.id === item.connectionId)?.name ?? c("已撤销连接", "Revoked connection")}</strong><small>{item.action} · {new Date(item.occurredAt).toLocaleString(locale)}</small></li>)}</ol> : <p>{c("调用工具使用连接后，这里会出现操作记录。", "Activity appears here after a tool uses a connection.")}</p>}</section>
+      <p className="api-account-note"><ShieldCheck size={16} />{c(`这些连接属于 ${accountEmail}，不能切换到其他账户，也不会获得你的登录密码。`, `These connections belong to ${accountEmail}. They cannot switch accounts or access your sign-in password.`)}</p>
       </> : null}
     </section>
   );

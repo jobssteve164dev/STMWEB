@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-surface="app">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,13 +8,23 @@
       content="通过浏览器连接、记录和管理 STM32 智能硬件调试过程。"
     />
     <meta name="theme-color" content="#0b1118" />
+    <script>
+      (() => {
+        const publicRoutes = new Set(["/", "/plans", "/terms", "/privacy", "/cookie-policy", "/refund-policy", "/data-rights", "/do-not-sell", "/ai-disclaimer", "/legal-supplement"]);
+        const isPublic = publicRoutes.has(window.location.pathname.replace(/\/+$/, "") || "/");
+        document.documentElement.dataset.surface = isPublic ? "public" : "app";
+        const theme = isPublic ? "#f8faf7" : "#091018";
+        document.documentElement.style.background = theme;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme);
+      })();
+    </script>
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101827'/%3E%3Cpath d='M20 18h24v28H20z' fill='%2322d3a7'/%3E%3Cpath d='M27 25h10v14H27z' fill='%230b1118'/%3E%3C/svg%3E"
     />
     <title>STMWEB · 硬件调试工作台</title>
   </head>
-  <body>
+  <body style="background: inherit">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -8,9 +8,9 @@ process.env.BETTER_AUTH_URL = "https://stmweb.example";
 process.env.PASSPORT_PRODUCT = "stmweb";
 process.env.SZLKLAWS_BASE_URL = "https://laws.example";
 
-function requestJson(port: number, path: string) {
+function requestJson(port: number, path: string, headers?: Record<string, string>) {
   return new Promise<{ status: number; body: unknown }>((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path }, (response) => {
+    http.get({ host: "127.0.0.1", port, path, headers }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => { body += chunk; });
@@ -60,4 +60,8 @@ test("proxies shared and product-specific legal pages from SZLKLAWS", async (con
   assert.equal(supplement.pathname, "/api/legal/product-supplement");
   assert.equal(supplement.searchParams.get("product"), "stmweb");
   assert.equal(supplement.searchParams.has("type"), false);
+
+  assert.equal((await requestJson(address.port, "/api/legal/privacy?locale=en-GB", { "Accept-Language": "zh-CN" })).status, 200);
+  const english = new URL(upstreamUrls[3]);
+  assert.equal(english.searchParams.get("locale"), "en-GB");
 });

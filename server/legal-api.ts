@@ -42,14 +42,18 @@ router.get("/:document", async (request: Request, response: Response, next: Next
       return;
     }
     const url = new URL(endpoint, env.SZLKLAWS_BASE_URL);
+    const requestedLocale = typeof request.query.locale === "string" ? request.query.locale : request.acceptsLanguages()[0];
+    const locale = requestedLocale?.toLowerCase().startsWith("en") ? "en-GB" : "zh-CN";
     url.searchParams.set("product", env.PASSPORT_PRODUCT);
-    url.searchParams.set("locale", "zh-CN");
+    url.searchParams.set("locale", locale);
     if (type) url.searchParams.set("type", type);
     const upstream = await fetchLegalDocument(url);
     const body = await upstream.text();
     response.status(upstream.status).set({
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
+      "Content-Language": locale,
+      "Vary": "Accept-Language",
     }).send(body);
   } catch (error) {
     next(error);

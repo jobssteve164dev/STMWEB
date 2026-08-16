@@ -12,6 +12,7 @@ import {
   Database,
   FileCheck2,
   Gauge,
+  Languages,
   Radio,
   ShieldCheck,
   SlidersHorizontal,
@@ -49,12 +50,24 @@ function Brand() {
 }
 
 function PublicHeader() {
-  const { isEnglish } = useLocale();
+  const { isEnglish, toggleLocale } = useLocale();
   return (
     <header className="public-nav">
       <Brand />
       <nav aria-label={isEnglish ? "Primary navigation" : "主要导航"}><a href="/">{isEnglish ? "Home" : "首页"}</a><a href="/#workflow">{isEnglish ? "How It Works" : "工作方式"}</a><a href="/#capabilities">{isEnglish ? "Capabilities" : "产品能力"}</a><a href="/plans">{isEnglish ? "Plans" : "计划"}</a></nav>
-      <a className="public-nav-cta" href="/workbench">{isEnglish ? "Open Workbench" : "进入工作台"} <ArrowRight size={15} /></a>
+      <div className="public-nav-actions">
+        <button
+          aria-label={isEnglish ? "切换到中文" : "Switch to English"}
+          className="public-language-toggle"
+          onClick={toggleLocale}
+          title={isEnglish ? "切换到中文" : "Switch to English"}
+          type="button"
+        >
+          <Languages size={16} aria-hidden="true" />
+          <span>{isEnglish ? "中文" : "EN"}</span>
+        </button>
+        <a className="public-nav-cta" href="/workbench">{isEnglish ? "Open Workbench" : "进入工作台"} <ArrowRight size={15} /></a>
+      </div>
     </header>
   );
 }

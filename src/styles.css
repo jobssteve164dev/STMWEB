@@ -1182,7 +1182,7 @@ h1, h2, h3 { text-wrap: balance; }
   min-height: calc(100vh - 150px);
 }
 
-.api-settings { display: grid; gap: 22px; }
+.api-settings { align-content: start; display: grid; gap: 22px; grid-auto-rows: max-content; }
 .settings-pro-gate, .pro-feature-gate { align-items: center; border: 1px solid rgba(64, 216, 181, .28); border-radius: var(--radius-lg); background: linear-gradient(135deg, rgba(64, 216, 181, .09), var(--surface)); display: grid; gap: 16px; grid-template-columns: auto 1fr auto; padding: 22px; }
 .settings-pro-gate > span, .pro-feature-icon { align-items: center; background: var(--accent-soft); border-radius: 12px; color: var(--accent); display: inline-flex; height: 46px; justify-content: center; width: 46px; }
 .settings-pro-gate strong, .pro-feature-gate strong { color: var(--text-strong); display: block; font-size: 16px; }

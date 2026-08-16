@@ -46,6 +46,7 @@ interface DeviceWorkbenchProps {
   selected: DeviceCapabilityType[];
   telemetry: TelemetrySnapshot;
   isDemo: boolean;
+  proAccess: boolean;
   onChange: (selected: DeviceCapabilityType[]) => void;
 }
 
@@ -76,7 +77,7 @@ function availableTypes(manifest: DeviceCapabilityManifest): DeviceCapabilityTyp
   return [...values];
 }
 
-export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChange }: DeviceWorkbenchProps) {
+export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAccess, onChange }: DeviceWorkbenchProps) {
   const [pickerOpen, setPickerOpen] = useState(true);
   const available = availableTypes(manifest);
   const hasAveragePwm = manifest.capabilities.some((capability) => capability.type === "motor" && capability.channels.includes("averagePwm"));
@@ -174,7 +175,7 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, onChang
             </article>
           ) : null}
 
-          {selected.includes("firmware") ? <BuildRunnerPanel /> : null}
+          {selected.includes("firmware") ? <BuildRunnerPanel proAccess={proAccess} /> : null}
           {selected.includes("terminal") ? <article className="workbench-card compact-action-widget"><SquareTerminal size={21} /><div><strong>调试终端</strong><span>原始输出继续显示在下方会话终端，并随调试会话保存。</span></div></article> : null}
           {selected.includes("events") ? <article className="workbench-card compact-action-widget"><ListChecks size={21} /><div><strong>事件记录</strong><span>连接、参数、控制、构建和烧录操作统一进入当前会话。</span></div></article> : null}
         </div>

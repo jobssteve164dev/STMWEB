@@ -69,6 +69,26 @@ test("links the final persisted local account id to the Passport identity", asyn
   });
 });
 
+test("uses the shared Passport entitlement as the Pro access source of truth", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(new URL(String(input)).pathname, "/api/v1/entitlements/access-check");
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ ok: true, data: { allowed: true, featureKey: "paid_subscription" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const { hasStmwebProAccess } = await import("../server/passport.js");
+  assert.equal(await hasStmwebProAccess({ id: "passport-entitled-1", email: "pro@example.com" }), true);
+  assert.deepEqual(requestBody, {
+    userId: "passport-entitled-1",
+    email: "pro@example.com",
+    product: "stmweb",
+    featureKey: "paid_subscription",
+  });
+});
+
 test("preserves Passport request id and failure stage for server-side diagnosis", async () => {
   globalThis.fetch = async () => new Response(JSON.stringify({
     ok: false,

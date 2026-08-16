@@ -59,6 +59,9 @@ async function passportRequest(path: string, init: { method?: string; body?: unk
 }
 
 export interface PassportUser { id: string; email: string; name: string | null }
+export const STMWEB_PRO_FEATURE = "paid_subscription";
+
+const accessCache = new Map<string, { allowed: boolean; checkedAt: number }>();
 
 function readUser(result: Record<string, unknown>): PassportUser {
   const raw = result.user;
@@ -88,6 +91,24 @@ export async function linkPassportIdentity(user: PassportUser, productUserId: st
 
 export function getBillingCatalog() {
   return passportRequest("billing/catalog", { query: { product: env.PASSPORT_PRODUCT } });
+}
+
+export async function hasStmwebProAccess(user: { id: string; email: string }): Promise<boolean> {
+  const cacheKey = `${user.id}:${STMWEB_PRO_FEATURE}`;
+  const cached = accessCache.get(cacheKey);
+  if (cached && Date.now() - cached.checkedAt < 60_000) return cached.allowed;
+  const decision = await passportRequest("entitlements/access-check", {
+    method: "POST",
+    body: {
+      userId: user.id,
+      email: user.email,
+      product: env.PASSPORT_PRODUCT,
+      featureKey: STMWEB_PRO_FEATURE,
+    },
+  });
+  const allowed = decision.allowed === true && decision.featureKey === STMWEB_PRO_FEATURE;
+  accessCache.set(cacheKey, { allowed, checkedAt: Date.now() });
+  return allowed;
 }
 
 export async function createCheckoutLink(input: { planId: string; user: PassportUser }) {

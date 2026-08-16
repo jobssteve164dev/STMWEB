@@ -5,6 +5,7 @@ import { z } from "zod";
 import { pool } from "./database.js";
 import { env } from "./env.js";
 import { getAuthenticatedUser, type InternalUser } from "./internal-auth.js";
+import { hasStmwebProAccess } from "./passport.js";
 
 export const API_SCOPES = [
   "devices:read", "devices:control", "debug:read", "debug:execute",
@@ -89,6 +90,9 @@ export async function requireUserOrApiConnection(request: Request, response: Res
     if (!identity) {
       return response.status(401).json({ error: "API 凭证无效或已撤销" });
     }
+    if (!await hasStmwebProAccess({ id: identity.user.passportUserId, email: identity.user.email })) {
+      return response.status(403).json({ error: "API 连接需要有效的 Pro 计划", code: "pro_required" });
+    }
     const apiRequest = request as AuthenticatedApiRequest;
     apiRequest.currentUser = identity.user;
     apiRequest.apiConnection = identity.connection;
@@ -154,6 +158,9 @@ apiConnectionsRouter.use(async (request, response, next) => {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
     const user = await getAuthenticatedUser(request);
     if (!user) return response.status(401).json({ error: "请先登录" });
+    if (!await hasStmwebProAccess({ id: user.passportUserId, email: user.email })) {
+      return response.status(403).json({ error: "API 连接需要 Pro 计划", code: "pro_required" });
+    }
     (request as AuthenticatedApiRequest).currentUser = user;
     return next();
   } catch (error) { return next(error); }

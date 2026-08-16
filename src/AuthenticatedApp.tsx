@@ -7,6 +7,7 @@ import { configureWorkspace } from "./db.js";
 interface BootstrapData {
   user: AuthUser;
   workspaces: Array<{ id: string; name: string; slug: string; role: string }>;
+  planAccess: { tier: "free" | "pro"; pro: boolean; status: "ready" | "unavailable" };
 }
 
 function LoginScreen({ message }: { message?: string }) {
@@ -101,6 +102,7 @@ export default function AuthenticatedApp() {
     <App
       workspace={bootstrap.workspaces[0]}
       user={bootstrap.user}
+      planAccess={bootstrap.planAccess}
       onSignOut={() => void signOut().then(() => window.location.reload())}
     />
   );

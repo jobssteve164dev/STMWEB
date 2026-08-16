@@ -6,6 +6,7 @@ import {
   Cable,
   Check,
   ChevronDown,
+  CircleMinus,
   CloudCog,
   Cpu,
   Database,
@@ -45,11 +46,11 @@ function Brand() {
   return <a className="public-brand" href="/" aria-label="STMWEB 首页"><span><Activity size={19} /></span><strong>STMWEB</strong></a>;
 }
 
-function PublicHeader({ compact = false }: { compact?: boolean }) {
+function PublicHeader() {
   return (
-    <header className={compact ? "public-nav compact" : "public-nav"}>
+    <header className="public-nav">
       <Brand />
-      {!compact ? <nav aria-label="主要导航"><a href="/#workflow">工作方式</a><a href="/#capabilities">产品能力</a><a href="/plans">计划</a></nav> : null}
+      <nav aria-label="主要导航"><a href="/">首页</a><a href="/#workflow">工作方式</a><a href="/#capabilities">产品能力</a><a href="/plans">计划</a></nav>
       <a className="public-nav-cta" href="/workbench">进入工作台 <ArrowRight size={15} /></a>
     </header>
   );
@@ -58,9 +59,10 @@ function PublicHeader({ compact = false }: { compact?: boolean }) {
 function PublicFooter() {
   return (
     <footer className="public-footer">
-      <div><Brand /><p>让每一次 STM32 调试都可连接、可理解、可追溯。</p></div>
-      <nav aria-label="法律与产品信息">{legalLinks.map(([href, label]) => <a href={href} key={href}>{label}</a>)}</nav>
-      <p>© {new Date().getUTCFullYear()} SZLK LTD</p>
+      <div className="public-footer-brand"><Brand /><p>让每一次 STM32 调试都可连接、可理解、可追溯。</p><address>SZLK LTD<br />Company No. 16843016<br />Registered in England and Wales</address></div>
+      <div className="public-footer-group"><strong>产品</strong><nav aria-label="产品信息"><a href="/">产品首页</a><a href="/workbench">硬件工作台</a><a href="/plans">产品计划</a></nav></div>
+      <div className="public-footer-group legal"><strong>法律</strong><nav aria-label="法律信息">{legalLinks.map(([href, label]) => <a href={href} key={href}>{label}</a>)}</nav></div>
+      <p>© {new Date().getUTCFullYear()} SZLK LTD. All rights reserved.</p>
     </footer>
   );
 }
@@ -184,6 +186,8 @@ type BillingPlan = {
   amountCents: number;
   metadata?: {
     customerDisplay?: { zh?: { name?: string; billingSuffix?: string; offerLabel?: string; summary?: string } };
+    freeTier?: { amountCents?: number; name?: { zh?: string }; summary?: { zh?: string } };
+    features?: Array<{ key?: string; name?: { zh?: string }; free?: { zh?: string }; paid?: { zh?: string } }>;
     refundDays?: number;
     serviceBoundary?: { zh?: string };
   };
@@ -192,7 +196,11 @@ type BillingPlan = {
 function isBillingPlan(value: unknown): value is BillingPlan {
   if (!value || typeof value !== "object") return false;
   const plan = value as Partial<BillingPlan>;
-  return typeof plan.planId === "string" && plan.interval === "year" && plan.currency === "usd" && Number.isInteger(plan.amountCents) && Number(plan.amountCents) > 0;
+  const metadata = plan.metadata;
+  return typeof plan.planId === "string" && plan.interval === "year" && plan.currency === "usd" && Number.isInteger(plan.amountCents) && Number(plan.amountCents) > 0
+    && metadata?.freeTier?.amountCents === 0 && Boolean(metadata.freeTier.name?.zh) && Boolean(metadata.freeTier.summary?.zh)
+    && Array.isArray(metadata.features) && metadata.features.length > 0
+    && metadata.features.every((feature) => Boolean(feature.key && feature.name?.zh && feature.free?.zh && feature.paid?.zh));
 }
 
 export function PlansPage() {
@@ -211,8 +219,37 @@ export function PlansPage() {
   }, []);
   const display = plan?.metadata?.customerDisplay?.zh;
   const price = plan ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(plan.amountCents / 100) : "—";
+  const free = plan?.metadata?.freeTier;
+  const features = plan?.metadata?.features || [];
 
-  return <main className="public-page plans-page"><PublicHeader compact /><section className="plans-hero"><p className="public-eyebrow"><span /> 产品计划</p><h1>让硬件调试形成<br />一条持续可用的工程记录。</h1><p>只有一个年度计划。你自备硬件和 Runner，STMWEB 负责连接、组织、记录和验证结果。</p></section><section className="plan-card-wrap">{status === "loading" ? <div className="plan-loading" role="status">正在读取产品计划…</div> : status === "unavailable" || !plan ? <div className="plan-unavailable" role="alert"><strong>计划暂时无法读取</strong><p>购买入口暂时不可用，请稍后再试。工作台登录不受影响。</p><a className="public-secondary" href="/workbench">进入工作台</a></div> : <article className="plan-card"><div className="plan-card-main"><span>{display?.offerLabel || "年度订阅"}</span><h2>{display?.name || plan.labelZh || plan.label || "STMWEB 年度计划"}</h2><p>{display?.summary || "连接、记录和管理 STM32 设备调试流程，并使用自己的 Runner 完成可复现固件构建。"}</p><div className="plan-price"><strong>{price}</strong><small>{display?.billingSuffix || "/ 年"}</small></div><a className="public-primary" href={`/api/billing/checkout?planId=${encodeURIComponent(plan.planId)}`}>选择年度计划 <ArrowRight size={17} /></a>{plan.metadata?.refundDays ? <small>{plan.metadata.refundDays} 天退款期</small> : null}</div><div className="plan-includes"><h3>计划包含</h3><ul><li><Check />浏览器设备连接与能力识别</li><li><Check />动态调试工作台与组件选择</li><li><Check />设备、固件与调试会话记录</li><li><Check />用户授权 API 与外部工具连接</li><li><Check />自有 Runner 的固件构建与制品管理</li></ul><p><ShieldCheck size={16} />{plan.metadata?.serviceBoundary?.zh || "不包含实体硬件、编译节点、第三方工具费用或尚未完成实物验证的无线烧录能力。"}</p></div></article>}</section><section className="plans-notes"><article><Wifi /><h3>连接发生在你的电脑上</h3><p>浏览器设备权限不转交给云端服务。</p></article><article><CloudCog /><h3>算力由你选择</h3><p>Runner 只出站连接，不要求开放公网端口。</p></article><article><ShieldCheck /><h3>价格清楚且一致</h3><p>你看到的就是当前可购买的价格与权益。</p></article></section><PublicFooter /></main>;
+  return (
+    <main className="public-page plans-page">
+      <PublicHeader />
+      <section className="plans-hero">
+        <p className="public-eyebrow"><span /> 产品计划</p>
+        <h1>先免费完成一次调试，<br />需要持续工程能力时再升级。</h1>
+        <p>免费计划保留完整的浏览器连接与调试记录。Pro 面向需要自有 Runner 构建和外部工具自动化的持续研发工作。</p>
+      </section>
+      <section className="plan-card-wrap">
+        {status === "loading" ? <div className="plan-loading" role="status">正在读取产品计划…</div> : status === "unavailable" || !plan || !free ? <div className="plan-unavailable" role="alert"><strong>计划暂时无法读取</strong><p>为避免展示错误权益，购买入口暂时关闭。免费工作台仍可正常进入。</p><a className="public-secondary" href="/workbench">进入免费工作台</a></div> : <>
+          <div className="pricing-cards">
+            <article className="pricing-card free"><span>免费</span><h2>{free.name?.zh}</h2><p>{free.summary?.zh}</p><div className="plan-price"><strong>$0</strong><small>长期可用</small></div><a className="public-secondary" href="/workbench">免费进入工作台</a></article>
+            <article className="pricing-card pro"><span>{display?.offerLabel || "年度订阅"}</span><h2>{display?.name || plan.labelZh || plan.label}</h2><p>{display?.summary}</p><div className="plan-price"><strong>{price}</strong><small>{display?.billingSuffix || "/ 年"}</small></div><a className="public-primary" href={`/api/billing/checkout?planId=${encodeURIComponent(plan.planId)}`}>升级 Pro <ArrowRight size={17} /></a>{plan.metadata?.refundDays ? <small>{plan.metadata.refundDays} 天退款期</small> : null}</article>
+          </div>
+          <div className="plan-comparison">
+            <h2>免费版和 Pro 的区别</h2>
+            <div className="comparison-table" role="table" aria-label="STMWEB 免费版与 Pro 权限对比">
+              <div className="comparison-row heading" role="row"><span role="columnheader">能力</span><strong role="columnheader">免费</strong><strong role="columnheader">Pro</strong></div>
+              {features.map((feature) => <div className="comparison-row" role="row" key={feature.key}><span role="cell">{feature.name?.zh}</span><span role="cell">{feature.free?.zh === "不包含" ? <><CircleMinus size={16} />不包含</> : <><Check size={16} />{feature.free?.zh}</>}</span><span role="cell"><Check size={16} />{feature.paid?.zh}</span></div>)}
+            </div>
+          </div>
+          <p className="plan-boundary"><ShieldCheck size={17} />{plan.metadata?.serviceBoundary?.zh}</p>
+        </>}
+      </section>
+      <section className="plans-notes"><article><Wifi /><h3>免费先体验真实价值</h3><p>连接设备、生成工作台、保存工程记录，不用先付款。</p></article><article><CloudCog /><h3>为持续研发升级</h3><p>需要 Runner 构建和 API 自动化时，再进入 Pro。</p></article><article><ShieldCheck /><h3>拒绝隐藏限制</h3><p>免费和 Pro 的差异由同一产品计划明确展示并执行。</p></article></section>
+      <PublicFooter />
+    </main>
+  );
 }
 
 type LegalSection = { id: string; title: string; body_markdown: string };
@@ -248,12 +285,12 @@ export function LegalPage({ slug }: { slug: string }) {
   }, [slug]);
   const hiddenIds = useMemo(() => new Set(["product_display_boundary", "professional_review"]), []);
   if (!route) return <NotFoundPage />;
-  return <main className="public-page legal-page"><PublicHeader compact /><article className="legal-document"><header><p>STMWEB 法律文件</p><h1>{document?.title || route.title}</h1>{document ? <div><span>生效日期：{formatLegalDate(document.effective_at)}</span><span>版本：{document.version}</span></div> : null}</header>{error ? <div className="legal-unavailable" role="alert"><strong>法律文件暂时无法读取</strong><p>为避免展示过期内容，本页不会使用替代文本，请稍后重试。</p><button type="button" onClick={() => window.location.reload()}>重新加载</button></div> : !document ? <div className="legal-loading" role="status">正在读取当前生效版本…</div> : <><div className="legal-notice">以下内容为 SZLKLAWS 当前管理并发布的中文版本。重要服务或数据处理方式变化时，本页面会随受管版本更新。</div>{document.composition.flatMap((part) => part.sections).filter((section) => !hiddenIds.has(section.id)).map((section) => <section key={section.id}><h2>{section.title}</h2><SectionBody body={section.body_markdown} /></section>)}</>}</article><PublicFooter /></main>;
+  return <main className="public-page legal-page"><PublicHeader /><article className="legal-document"><header><p>STMWEB 法律文件</p><h1>{document?.title || route.title}</h1>{document ? <div><span>生效日期：{formatLegalDate(document.effective_at)}</span><span>版本：{document.version}</span></div> : null}</header>{error ? <div className="legal-unavailable" role="alert"><strong>法律文件暂时无法读取</strong><p>为避免展示过期内容，本页不会使用替代文本，请稍后重试。</p><button type="button" onClick={() => window.location.reload()}>重新加载</button></div> : !document ? <div className="legal-loading" role="status">正在读取当前生效版本…</div> : <><div className="legal-notice">以下内容为 SZLKLAWS 当前管理并发布的中文版本。重要服务或数据处理方式变化时，本页面会随受管版本更新。</div>{document.composition.flatMap((part) => part.sections).filter((section) => !hiddenIds.has(section.id)).map((section) => <section key={section.id}><h2>{section.title}</h2><SectionBody body={section.body_markdown} /></section>)}</>}</article><PublicFooter /></main>;
 }
 
 export function NotFoundPage() {
   usePageMetadata("页面未找到 · STMWEB", "请求的 STMWEB 页面不存在。");
-  return <main className="public-page not-found-page"><PublicHeader compact /><section><span>404</span><h1>这里没有你要找的页面。</h1><p>返回产品首页，或者直接进入硬件调试工作台。</p><div><a className="public-secondary" href="/">返回首页</a><a className="public-primary" href="/workbench">进入工作台</a></div></section><PublicFooter /></main>;
+  return <main className="public-page not-found-page"><PublicHeader /><section><span>404</span><h1>这里没有你要找的页面。</h1><p>返回产品首页，或者直接进入硬件调试工作台。</p><div><a className="public-secondary" href="/">返回首页</a><a className="public-primary" href="/workbench">进入工作台</a></div></section><PublicFooter /></main>;
 }
 
 function usePageMetadata(title: string, description: string) {

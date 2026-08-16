@@ -18,6 +18,7 @@ import {
   Loader2,
   LogOut,
   MemoryStick,
+  BadgeDollarSign,
   Play,
   Plug,
   Radio,
@@ -100,6 +101,7 @@ interface MetricCardProps {
 interface AppProps {
   workspace: { id: string; name: string; slug: string; role: string };
   user: { id: string; username: string; name: string; email?: string };
+  planAccess: { tier: "free" | "pro"; pro: boolean; status: "ready" | "unavailable" };
   onSignOut: () => void;
 }
 
@@ -215,7 +217,7 @@ function EmptyState({ icon: Icon, title, body, action }: {
   );
 }
 
-function App({ workspace, user, onSignOut }: AppProps) {
+function App({ workspace, user, planAccess, onSignOut }: AppProps) {
   const [activeView, setActiveView] = useState<ViewId>("console");
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
@@ -687,6 +689,10 @@ function App({ workspace, user, onSignOut }: AppProps) {
           <ShieldCheck size={18} aria-hidden="true" />
           <div><strong>{storageHealthy ? "自动记录已开启" : "记录存储受限"}</strong><span>{storageLabel}</span></div>
         </div>
+        <a className="workbench-plan-link" href="/plans">
+          <BadgeDollarSign size={18} aria-hidden="true" />
+          <span><strong>{planAccess.pro ? "Pro 计划" : "免费计划"}</strong><small>{planAccess.pro ? "Runner 与 API 已解锁" : "查看 Pro 能力"}</small></span>
+        </a>
       </aside>
 
       <div className="workspace">
@@ -758,6 +764,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
                   selected={selectedComponents}
                   telemetry={telemetrySnapshot}
                   isDemo={Boolean(connectionInfo?.isDemo)}
+                  proAccess={planAccess.pro}
                   onChange={updateSelectedComponents}
                 />
               ) : connectionInfo ? (
@@ -852,7 +859,7 @@ function App({ workspace, user, onSignOut }: AppProps) {
               )}
             </section>
           ) : null}
-          {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} /> : null}
+          {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} proAccess={planAccess.pro} /> : null}
         </main>
       </div>
 

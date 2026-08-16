@@ -7,9 +7,10 @@ import { pool, withTransaction } from "./database.js";
 import { env } from "./env.js";
 import { digestRunnerSecret } from "./runner-auth.js";
 import { requireConnectionScope, requireConnectionWorkspace, requireUserOrApiConnection, type AuthenticatedApiRequest } from "./api-connection-auth.js";
+import { hasStmwebProAccess } from "./passport.js";
 
 interface AuthenticatedRequest extends Request {
-  currentUser: { id: string; username: string; name: string };
+  currentUser: { id: string; username: string; name: string; email: string; passportUserId: string };
 }
 
 const router = express.Router();
@@ -78,6 +79,16 @@ async function requireWorkspace(
 router.use(requireUserOrApiConnection);
 router.use(requireConnectionScope);
 router.use(express.json({ limit: "1mb" }));
+router.use(asyncRoute(async (request, response, next) => {
+  if (!/^\/workspaces\/[^/]+\/(runners|builds)(?:\/|$)/.test(request.path)) return next();
+  const user = (request as AuthenticatedRequest).currentUser;
+  const allowed = await hasStmwebProAccess({ id: user.passportUserId, email: user.email });
+  if (!allowed) {
+    response.status(403).json({ error: "连接编译算力和创建固件构建需要 Pro 计划", code: "pro_required" });
+    return;
+  }
+  next();
+}));
 
 router.get("/me", (request, response) => {
   response.json({ user: (request as AuthenticatedRequest).currentUser });
@@ -114,7 +125,14 @@ router.get("/bootstrap", asyncRoute(async (request, response) => {
     }
     return workspaces.rows;
   });
-  response.json({ user, workspaces: result });
+  let pro = false;
+  let accessStatus: "ready" | "unavailable" = "ready";
+  try {
+    pro = await hasStmwebProAccess({ id: user.passportUserId, email: user.email });
+  } catch {
+    accessStatus = "unavailable";
+  }
+  response.json({ user, workspaces: result, planAccess: { tier: pro ? "pro" : "free", pro, status: accessStatus } });
 }));
 
 router.get("/workspaces/:workspaceId/devices", asyncRoute(async (request, response) => {

@@ -1,4 +1,4 @@
-import { Check, Clipboard, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowRight, Check, Clipboard, KeyRound, Loader2, LockKeyhole, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 type ApiScope = "devices:read" | "devices:control" | "debug:read" | "debug:execute" |
@@ -49,7 +49,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-export function ApiConnectionsSettings({ accountEmail }: { accountEmail: string }) {
+export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEmail: string; proAccess: boolean }) {
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [activity, setActivity] = useState<ApiActivity[]>([]);
   const [credential, setCredential] = useState<string | null>(null);
@@ -63,7 +63,9 @@ export function ApiConnectionsSettings({ accountEmail }: { accountEmail: string 
     setActivity(result.recentActivity);
   }, []);
 
-  useEffect(() => { void load().catch((reason) => setError(reason instanceof Error ? reason.message : "API 连接暂时无法读取")); }, [load]);
+  useEffect(() => {
+    if (proAccess) void load().catch((reason) => setError(reason instanceof Error ? reason.message : "API 连接暂时无法读取"));
+  }, [load, proAccess]);
 
   async function perform(action: () => Promise<{ credential?: string } | unknown>) {
     setBusy(true);
@@ -80,6 +82,8 @@ export function ApiConnectionsSettings({ accountEmail }: { accountEmail: string 
   return (
     <section className="page-section api-settings" aria-labelledby="api-settings-heading">
       <div className="page-heading"><div><span className="panel-kicker">账户设置</span><h1 id="api-settings-heading">API 连接</h1><p>把你的硬件工作台接到自己信任的工具。每个连接只代表当前账户，并且可以随时撤销。</p></div></div>
+      {!proAccess ? <div className="settings-pro-gate"><span><LockKeyhole size={22} /></span><div><strong>API 自动化属于 Pro 计划</strong><p>你仍可免费使用浏览器连接、动态调试台和工程记录。升级后才能创建可轮换、可撤销的外部工具连接。</p></div><a className="primary-button" href="/plans">比较计划 <ArrowRight size={16} /></a></div> : null}
+      {proAccess ? <>
       {error ? <div className="api-error" role="alert">{error}</div> : null}
       <form className="api-connection-form" onSubmit={(event) => {
         event.preventDefault();
@@ -106,6 +110,7 @@ export function ApiConnectionsSettings({ accountEmail }: { accountEmail: string 
       </article>) : <div className="empty-state"><span className="empty-icon"><KeyRound size={25} /></span><strong>还没有 API 连接</strong><p>创建后，你可以把凭证交给自己信任的调用工具。</p></div>}</div>
       <section className="api-activity"><h2>最近调用</h2>{activity.length ? <ol>{activity.map((item) => <li key={item.id}><span className={item.outcome}>{item.outcome === "succeeded" ? "成功" : "失败"}</span><strong>{connections.find((connection) => connection.id === item.connectionId)?.name ?? "已撤销连接"}</strong><small>{item.action} · {new Date(item.occurredAt).toLocaleString("zh-CN")}</small></li>)}</ol> : <p>调用工具使用连接后，这里会出现操作记录。</p>}</section>
       <p className="api-account-note"><ShieldCheck size={16} />这些连接属于 {accountEmail}，不能切换到其他账户，也不会获得你的登录密码。</p>
+      </> : null}
     </section>
   );
 }

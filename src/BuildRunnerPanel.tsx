@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clipboard, CloudCog, Download, FileArchive, Loader2, Play, Plus, RefreshCw, Square, TerminalSquare } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, Clipboard, CloudCog, Download, FileArchive, Loader2, LockKeyhole, Play, Plus, RefreshCw, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   buildArtifactUrl,
@@ -15,7 +15,7 @@ const statusText: Record<BuildJobRecord["status"], string> = {
   queued: "等待编译", leased: "正在准备", running: "正在编译", succeeded: "编译完成", failed: "编译失败", cancelled: "已取消",
 };
 
-export function BuildRunnerPanel() {
+export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
   const [runners, setRunners] = useState<BuildRunnerRecord[]>([]);
   const [jobs, setJobs] = useState<BuildJobRecord[]>([]);
   const [pairing, setPairing] = useState<{ code: string; expiresAt: string; command: string } | null>(null);
@@ -31,10 +31,21 @@ export function BuildRunnerPanel() {
   }
 
   useEffect(() => {
+    if (!proAccess) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [proAccess]);
+
+  if (!proAccess) {
+    return (
+      <article className="workbench-card pro-feature-gate">
+        <span className="pro-feature-icon"><LockKeyhole size={22} /></span>
+        <div><span>PRO</span><strong>用自己的 Runner 构建固件</strong><p>免费计划保留浏览器连接和完整调试记录；升级后可接入 x86 Linux 算力、创建构建并下载校验后的制品。</p></div>
+        <a className="primary-button" href="/plans">查看 Pro 计划 <ArrowRight size={16} /></a>
+      </article>
+    );
+  }
 
   async function generatePairing() {
     setBusy(true);

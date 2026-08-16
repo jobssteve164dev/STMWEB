@@ -67,7 +67,13 @@ with open(target, "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
-printf 'package=%s\npackage_sha256=%s\npackage_bytes=%s\nimage_archive_bytes=%s\nimage_bytes=%s\nimage_reference=%s\n' \
+BUILD_CONTEXT_BYTES="$(tar --exclude-vcs --exclude-from="$REPOSITORY_ROOT/.dockerignore" -cf - -C "$REPOSITORY_ROOT" . | wc -c)"
+LARGEST_CONTRIBUTORS="$(du -sb \
+  "$REPOSITORY_ROOT/firmware-adapters" \
+  "$REPOSITORY_ROOT/runner" \
+  "$REPOSITORY_ROOT/scripts" 2>/dev/null | sort -nr | head -5 | tr '\n' ';')"
+printf 'package=%s\npackage_sha256=%s\npackage_bytes=%s\nbuild_context_bytes=%s\nimage_archive_bytes=%s\nimage_bytes=%s\nimage_reference=%s\nlargest_source_contributors=%s\nplatform=linux/amd64\n' \
   "$PACKAGE_NAME" "$PACKAGE_SHA" "$(stat -c %s "$PACKAGE_PATH")" \
-  "$(stat -c %s "$PACKAGE_ROOT/runtime/image.tar.gz")" "$(docker image inspect --format '{{.Size}}' "$IMAGE")" "$IMAGE" \
+  "$BUILD_CONTEXT_BYTES" "$(stat -c %s "$PACKAGE_ROOT/runtime/image.tar.gz")" \
+  "$(docker image inspect --format '{{.Size}}' "$IMAGE")" "$IMAGE" "$LARGEST_CONTRIBUTORS" \
   > "$OUTPUT_DIRECTORY/build-evidence.txt"

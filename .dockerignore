@@ -8,6 +8,7 @@ output
 .env
 .env.*
 *.log
+*.tar.gz
 AGENTS.md
 agent.md
 PROJECT_MEMORY.md

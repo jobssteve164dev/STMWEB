@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, runner, dockerfile, schema] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, runner, dockerfile, dockerignore, schema] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
@@ -11,6 +11,7 @@ const [workflow, release, installer, packageInstaller, packageBuilder, packageVe
   read("scripts/verify-firmware-compilation-release.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
+  read(".dockerignore"),
   read("contracts/compiler-environment.schema.json"),
 ]);
 
@@ -27,6 +28,8 @@ assert.match(installer, /--entrypoint node/);
 assert.match(installer, /\/var\/run\/docker\.sock/);
 assert.match(packageBuilder, /export-classic-docker-archive\.sh/);
 assert.match(packageBuilder, /stmweb-firmware-compilation-linux-amd64/);
+assert.match(packageBuilder, /build_context_bytes/);
+assert.match(packageBuilder, /largest_source_contributors/);
 assert.match(packageVerifier, /package member set is invalid/);
 assert.match(packageInstaller, /--code-file \/run\/stmweb-pairing-code/);
 assert.doesNotMatch(packageInstaller, /--code \"\$PAIRING_CODE\"/);
@@ -39,4 +42,5 @@ assert.match(dockerfile, /COPY firmware-adapters\/dot-v1/);
 assert.match(dockerfile, /FROM node:22-bookworm-slim/);
 assert.match(dockerfile, /FROM docker:27-cli AS docker_cli/);
 assert.match(dockerfile, /unzip/);
+assert.match(dockerignore, /^\*\.tar\.gz$/m);
 process.stdout.write("compiler environment contract ok\n");

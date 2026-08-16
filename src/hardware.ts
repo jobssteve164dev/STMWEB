@@ -103,7 +103,9 @@ const ECB02_GATT = {
 } as const;
 
 function browserCopy(zh: string, en: string): string {
-  return typeof navigator !== "undefined" && !navigator.languages.some((language) => language.toLowerCase().startsWith("zh")) ? en : zh;
+  if (typeof navigator === "undefined") return zh;
+  const languages = Array.isArray(navigator.languages) ? navigator.languages : navigator.language ? [navigator.language] : [];
+  return languages.length > 0 && !languages.some((language) => language.toLowerCase().startsWith("zh")) ? en : zh;
 }
 
 const capabilityDefinitions: Array<Omit<HardwareCapability, "supported" | "permission">> = [

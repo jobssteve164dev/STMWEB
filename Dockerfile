@@ -6,6 +6,7 @@ RUN npm ci
 COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.server.json vite.config.ts ./
 COPY src ./src
 COPY server ./server
+COPY public ./public
 RUN npm run build
 
 FROM --platform=$TARGETPLATFORM node:22-alpine AS runtime

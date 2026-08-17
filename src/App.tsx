@@ -76,6 +76,7 @@ import {
 } from "./device-capabilities.js";
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
+import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
 import { InitialSwdFlashPanel } from "./InitialSwdFlashPanel.js";
 import { useLocale } from "./i18n.js";
 
@@ -764,6 +765,17 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                 <MetricCard label={c("实时温度", "Live temperature")} value={currentTemperature ? `${currentTemperature.toFixed(1)}°C` : "—"} note={currentSession?.isDemo ? c("演示遥测", "Demo telemetry") : c("等待数据", "Waiting for data")} icon={Gauge} />
               </section>
 
+              <section className="firmware-actions" aria-labelledby="firmware-actions-heading">
+                <div className="firmware-actions-heading">
+                  <div><span className="panel-kicker">{c("常用工具", "Common tools")}</span><h2 id="firmware-actions-heading">{c("固件安装与升级", "Firmware installation & updates")}</h2></div>
+                  <p>{c("第一次使用 SWD 安装无线升级入口，之后直接通过蓝牙更新应用固件。", "Install wireless updates over SWD the first time, then update application firmware directly over Bluetooth.")}</p>
+                </div>
+                <div className="firmware-actions-grid">
+                  <InitialSwdFlashPanel />
+                  <DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} />
+                </div>
+              </section>
+
               {deviceManifest ? (
                 <DeviceWorkbench
                   manifest={deviceManifest}
@@ -771,9 +783,6 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   telemetry={telemetrySnapshot}
                   isDemo={Boolean(connectionInfo?.isDemo)}
                   proAccess={planAccess.pro}
-                  connection={connectionRef.current}
-                  firmwareVersions={firmwareVersions}
-                  onEvent={appendEvent}
                   onChange={updateSelectedComponents}
                 />
               ) : connectionInfo ? (
@@ -847,7 +856,6 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
             <section className="page-section" aria-labelledby="firmware-heading">
               <div className="page-heading"><div><span className="panel-kicker">{c("版本化管理", "Versioned management")}</span><h1 id="firmware-heading">{c("固件制品", "Firmware artefacts")}</h1><p>{c("导入文件后计算 SHA-256，并完整保存到工作区数据库。", "Calculate SHA-256 on import and store the complete file in the workspace database.")}</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? c("正在校验", "Verifying…") : c("导入固件", "Import Firmware")}</button></div>
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
-              <InitialSwdFlashPanel />
               <div className="artifact-grid">
                 {combinedFirmware.map((version) => (
                   <article className="artifact-card" key={version.id}>

@@ -20,9 +20,6 @@ import {
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
 import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
-import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
-import type { DebugEventRecord, FirmwareVersionRecord } from "./db.js";
-import type { HardwareConnection } from "./hardware.js";
 import { useLocale } from "./i18n.js";
 
 interface TelemetrySnapshot {
@@ -51,9 +48,6 @@ interface DeviceWorkbenchProps {
   telemetry: TelemetrySnapshot;
   isDemo: boolean;
   proAccess: boolean;
-  connection: HardwareConnection | null;
-  firmwareVersions: FirmwareVersionRecord[];
-  onEvent: (level: DebugEventRecord["level"], message: string, payload?: DebugEventRecord["payload"]) => void;
   onChange: (selected: DeviceCapabilityType[]) => void;
 }
 
@@ -71,7 +65,7 @@ const componentIcons: Record<DeviceCapabilityType, LucideIcon> = {
 
 const englishComponentLabels: Record<DeviceCapabilityType, string> = {
   orientation: "Orientation", camera: "Camera", motor: "Motor", battery: "Battery", chart: "Charts",
-  terminal: "Terminal", controls: "Controls", events: "Events", firmware: "Firmware & Updates",
+  terminal: "Terminal", controls: "Controls", events: "Events", firmware: "Firmware Build",
 };
 
 function availableTypes(manifest: DeviceCapabilityManifest): DeviceCapabilityType[] {
@@ -82,7 +76,7 @@ function availableTypes(manifest: DeviceCapabilityManifest): DeviceCapabilityTyp
   return [...values];
 }
 
-export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAccess, connection, firmwareVersions, onEvent, onChange }: DeviceWorkbenchProps) {
+export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAccess, onChange }: DeviceWorkbenchProps) {
   const { isEnglish } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
   const statusLabel = (status: string) => status === "online" ? c("在线", "Online") : status === "degraded" ? c("受限", "Degraded") : status === "offline" ? c("离线", "Offline") : c("待确认", "Unknown");
@@ -183,7 +177,7 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAcce
             </article>
           ) : null}
 
-          {selected.includes("firmware") ? <><DotFirmwareFlashPanel connection={connection} voltage={telemetry.voltage} firmwareVersions={firmwareVersions} onEvent={onEvent} /><BuildRunnerPanel proAccess={proAccess} /></> : null}
+          {selected.includes("firmware") ? <BuildRunnerPanel proAccess={proAccess} /> : null}
           {selected.includes("terminal") ? <article className="workbench-card compact-action-widget"><SquareTerminal size={21} /><div><strong>{c("调试终端", "Debug Terminal")}</strong><span>{c("原始输出继续显示在下方会话终端，并随调试会话保存。", "Raw output remains in the session terminal below and is saved with the debugging session.")}</span></div></article> : null}
           {selected.includes("events") ? <article className="workbench-card compact-action-widget"><ListChecks size={21} /><div><strong>{c("事件记录", "Event History")}</strong><span>{c("连接、参数、控制、构建和烧录操作统一进入当前会话。", "Connections, parameters, controls, builds and flashing actions are recorded in the current session.")}</span></div></article> : null}
         </div>

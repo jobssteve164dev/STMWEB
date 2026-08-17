@@ -813,6 +813,59 @@ h1, h2, h3 { text-wrap: balance; }
   margin-top: 14px;
 }
 
+.firmware-actions {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.firmware-actions-heading {
+  align-items: end;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.firmware-actions-heading h2 {
+  color: var(--text-strong);
+  font-size: 22px;
+  margin: 5px 0 0;
+}
+
+.firmware-actions-heading > p {
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 560px;
+  text-align: right;
+}
+
+.firmware-actions-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr);
+}
+
+.firmware-actions-grid > * {
+  margin: 0;
+  min-width: 0;
+}
+
+.firmware-actions-grid .initial-flash-card {
+  align-content: start;
+  align-items: start;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.firmware-actions-grid .initial-flash-card > .primary-button {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.firmware-actions-grid .firmware-flash-widget {
+  grid-column: auto;
+}
+
 .metric-card {
   display: flex;
   min-height: 104px;
@@ -1449,7 +1502,7 @@ h1, h2, h3 { text-wrap: balance; }
 .plan-teaser, .public-final { align-items: center; background: var(--public-ink); border-radius: 26px; color: white; display: flex; justify-content: space-between; max-width: 1192px; padding: 58px 64px; }
 .plan-teaser h2 { font-size: clamp(34px, 4vw, 52px); }
 .plan-teaser > div > span { color: #a7b4ad; font-size: 14px; margin-top: 15px; }
-.faq-section { max-width: 920px; }
+.faq-section { width: 100%; }
 .public-faq { border-top: 1px solid var(--public-line); margin-top: 50px; }
 .public-faq details { border-bottom: 1px solid var(--public-line); }
 .public-faq summary { align-items: center; cursor: pointer; display: flex; font-size: 17px; font-weight: 750; justify-content: space-between; list-style: none; min-height: 78px; }
@@ -1522,7 +1575,7 @@ h1, h2, h3 { text-wrap: balance; }
 .plans-notes h3 { font-size: 16px; margin: 18px 0 8px; }
 .plans-notes p { color: var(--public-muted); font-size: 13px; line-height: 1.65; margin: 0; }
 
-.legal-document { margin: 0 auto; max-width: 800px; padding: 90px 24px 120px; }
+.legal-document { margin: 0 auto; max-width: var(--public-content); padding: 90px var(--public-gutter) 120px; }
 .legal-document > header { border-bottom: 1px solid var(--public-line); margin-bottom: 40px; padding-bottom: 34px; }
 .legal-document > header > p { color: var(--public-green); font-size: 11px; font-weight: 850; letter-spacing: .12em; margin: 0 0 16px; text-transform: uppercase; }
 .legal-document h1 { font-size: clamp(38px, 6vw, 58px); letter-spacing: -.05em; line-height: 1.1; margin: 0 0 20px; }
@@ -3058,6 +3111,7 @@ td small {
 .firmware-flash-widget > .primary-button { margin-top: 14px; }
 
 @media (max-width: 980px) {
+  .firmware-actions-grid { grid-template-columns: 1fr; }
   .component-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .camera-widget,
   .orientation-widget,
@@ -3071,6 +3125,8 @@ td small {
 }
 
 @media (max-width: 640px) {
+  .firmware-actions-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .firmware-actions-heading > p { text-align: left; }
   .workbench-heading { align-items: stretch; flex-direction: column; gap: 12px; }
   .component-picker { grid-template-columns: 1fr; }
   .component-choice { min-height: 72px; }

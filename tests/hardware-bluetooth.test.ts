@@ -81,6 +81,14 @@ test("connects the ECB02 GATT data channel and forwards notifications", async ()
 
   await connection.write?.("go");
   assert.deepEqual(Array.from(write.writes[0]), [103, 111]);
+  const raw: number[][] = [];
+  connection.setDataHandler?.((bytes) => raw.push([...bytes]));
+  const binary = new Uint8Array([0, 255, 17]);
+  notify.value = new DataView(binary.buffer);
+  notify.dispatchEvent(new Event("characteristicvaluechanged"));
+  assert.deepEqual(raw, [[0, 255, 17]]);
+  assert.deepEqual(received, ["STMWEB_CAPS:{}\r\n"]);
+  connection.setDataHandler?.(null);
   await connection.close();
   assert.equal(notify.notificationsStopped, true);
   assert.equal(disconnected, true);

@@ -13,6 +13,7 @@ export interface HardwareConnection {
   name: string;
   detail: string;
   write?: (data: Uint8Array | string) => Promise<void>;
+  setDataHandler?: (handler: ((data: Uint8Array) => void) | null) => void;
   close: () => Promise<void>;
 }
 
@@ -277,6 +278,7 @@ export async function requestHardwareConnection(
     let server: BluetoothServerLike | undefined;
     let notifyCharacteristic: BluetoothCharacteristicLike | undefined;
     let handleNotification: ((event: Event) => void) | undefined;
+    let dataHandler: ((data: Uint8Array) => void) | null = null;
     try {
       server = await device.gatt.connect();
       const service = await server.getPrimaryService(ECB02_GATT.service);
@@ -285,9 +287,10 @@ export async function requestHardwareConnection(
 
       handleNotification = (event: Event) => {
         const value = (event.target as BluetoothCharacteristicLike | null)?.value;
-        if (!value || !options.onSerialText) return;
-        const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-        options.onSerialText(new TextDecoder().decode(bytes));
+        if (!value) return;
+        const bytes = Uint8Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+        if (dataHandler) dataHandler(bytes);
+        else options.onSerialText?.(new TextDecoder().decode(bytes));
       };
       notifyCharacteristic.addEventListener("characteristicvaluechanged", handleNotification);
       await notifyCharacteristic.startNotifications();
@@ -296,6 +299,7 @@ export async function requestHardwareConnection(
         kind,
         name: device.name || browserCopy("ECB02 蓝牙设备", "ECB02 Bluetooth device"),
         detail: browserCopy("蓝牙数据通道已连接", "Bluetooth data channel connected"),
+        setDataHandler: (handler) => { dataHandler = handler; },
         write: async (data) => {
           const bytes = typeof data === "string"
             ? new TextEncoder().encode(data)

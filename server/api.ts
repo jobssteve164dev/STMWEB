@@ -211,6 +211,26 @@ router.post("/workspaces/:workspaceId/firmware", upload.single("file"), asyncRou
   response.status(201).json({ firmware: { ...result.rows[0], fileSize: Number(result.rows[0].fileSize) } });
 }));
 
+router.get("/workspaces/:workspaceId/firmware/:firmwareId/content", asyncRoute(async (request, response) => {
+  const user = (request as AuthenticatedRequest).currentUser;
+  const workspaceId = uuid.parse(request.params.workspaceId);
+  const firmwareId = uuid.parse(request.params.firmwareId);
+  requireConnectionWorkspace(request, workspaceId);
+  await requireWorkspace(user.id, workspaceId);
+  const result = await pool.query<{ fileName: string; content: Buffer; sha256: string }>(
+    `SELECT file_name AS "fileName",content,sha256 FROM firmware_versions WHERE id=$1 AND workspace_id=$2`,
+    [firmwareId, workspaceId],
+  );
+  const firmware = result.rows[0];
+  if (!firmware) { response.status(404).json({ error: "固件制品不存在" }); return; }
+  response.set({
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(firmware.fileName)}"`,
+    "X-Content-SHA256": firmware.sha256,
+  });
+  response.send(firmware.content);
+}));
+
 router.get("/workspaces/:workspaceId/sessions", asyncRoute(async (request, response) => {
   const user = (request as AuthenticatedRequest).currentUser;
   const workspaceId = uuid.parse(request.params.workspaceId);

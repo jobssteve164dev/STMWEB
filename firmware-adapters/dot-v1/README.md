@@ -14,7 +14,7 @@
 - 应用收到 `STMWEB:BOOT` 后先停止电机，再通过备份寄存器请求重启进入 Bootloader。Bootloader 使用原车 USART3（PB10/PB11、115200 8N1）接收带序号与 CRC32 的分块固件。
 - 应用区域止于 `0x0801FC00`，最后 1 KiB 保存应用有效标记、长度和 CRC32；升级开始先清除该页，因此断电或传输中断不会启动残缺应用。
 
-本地验证使用 ARM GNU Toolchain 14.2.1。CB 目标成功生成 ELF、HEX、BIN、MAP；应用 HEX 实际加载 90,276 字节，应用分区容量 113,664 字节，RAM 静态占用 5,344 字节；Bootloader HEX 实际加载 2,076 字节。真实烧录前仍须核对实物 MCU 容量并完成上电运行验收。
+本地验证使用 ARM GNU Toolchain 14.2.1。CB 目标成功生成 ELF、HEX、BIN、MAP；应用 HEX 实际加载 90,276 字节，应用分区容量 113,664 字节，RAM 静态占用 5,344 字节；Bootloader HEX 实际加载 2,128 字节。真实烧录前仍须完成上电运行验收。
 
 `dot_v1_initial_swd.hex` 目前是 DOT V1 / STM32F103CB 的实物验证固件，不适用于 C8。第一次写入前必须由 SWD 探针读回 128 KiB Flash；当前协议提供传输 CRC32 和失败恢复，制品签名与防回滚尚未完成前不得作为公共生产烧录协议。
 
@@ -33,4 +33,4 @@
 | payload | length | 命令数据 |
 | crc32 | 4 | 从 magic 到 payload 的标准 CRC32（多项式 `0xEDB88320`） |
 
-命令顺序为 `HELLO(0x01)`、`BEGIN(0x02)`、若干 `DATA(0x03)`、`END(0x04)`；另有 `ABORT(0x05)` 和 `RUN(0x06)`。BEGIN payload 是应用长度和整包 CRC32，各 4 字节。DATA 必须从偏移 0 连续发送，除最后一包外长度必须为偶数。响应命令为请求命令加 `0x80`，响应 offset 是 `stmweb_boot_protocol.h` 中的状态码。
+命令顺序为 `HELLO(0x01)`、`BEGIN(0x02)`、若干 `DATA(0x03)`、`END(0x04)`；另有 `ABORT(0x05)` 和 `RUN(0x06)`。BEGIN payload 是应用长度和整包 CRC32，各 4 字节。DATA 必须从偏移 0 连续发送，除最后一包外长度必须为偶数；相同末包重传会幂等确认。响应命令为请求命令加 `0x80`，响应 offset 是 `stmweb_boot_protocol.h` 中的状态码。HELLO payload 依次返回 Flash 字节数、应用基址、应用容量、应用有效状态和编译目标 Device ID，共 20 字节；真实 `DBGMCU_IDCODE` 只由首次 SWD 连接在擦除前读取，因为部分 STM32F103 修订版在普通程序运行态读取该寄存器会返回 0。

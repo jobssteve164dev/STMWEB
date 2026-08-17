@@ -76,7 +76,7 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
   const available = runners.filter((runner) => runner.status === "online");
   return (
     <article className="workbench-card build-runner-widget">
-      <div className="widget-heading"><div><CloudCog size={18} /><strong>{c("编译与烧录", "Build & Flash")}</strong></div><button type="button" aria-label={c("刷新编译状态", "Refresh build status")} onClick={() => void refresh()}><RefreshCw size={16} /></button></div>
+      <div className="widget-heading"><div><CloudCog size={18} /><strong>{c("固件构建", "Firmware Build")}</strong></div><button type="button" aria-label={c("刷新编译状态", "Refresh build status")} onClick={() => void refresh()}><RefreshCw size={16} /></button></div>
       <div className="runner-summary">
         <div><span className={available.length ? "runner-status online" : "runner-status"}><i />{available.length ? c(`${available.length} 台算力可用`, `${available.length} runner${available.length === 1 ? "" : "s"} available`) : c("尚未连接编译算力", "No build runner connected")}</span><small>{c("Runner 通过出站 HTTPS 主动领取任务", "The Runner collects jobs over outbound HTTPS")}</small></div>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => void generatePairing()}>{busy ? <Loader2 className="spinning" size={16} /> : <Plus size={16} />}{c("连接编译算力", "Connect Runner")}</button>

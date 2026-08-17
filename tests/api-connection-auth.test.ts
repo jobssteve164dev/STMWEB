@@ -17,6 +17,7 @@ test("maps public user API operations to stable scopes", () => {
   assert.equal(requiredApiScope("GET", "/workspaces/a/builds/b"), "builds:read");
   assert.equal(requiredApiScope("POST", "/workspaces/a/builds/b/cancel"), "builds:cancel");
   assert.equal(requiredApiScope("GET", "/workspaces/a/builds/b/artifacts/c"), "artifacts:read");
+  assert.equal(requiredApiScope("GET", "/workspaces/a/firmware/b/content"), "artifacts:read");
   assert.equal(requiredApiScope("GET", "/workspaces/a/sessions/b"), "debug:read");
   assert.equal(requiredApiScope("POST", "/api-connections"), null);
   assert.equal(new Set(API_SCOPES).size, API_SCOPES.length);

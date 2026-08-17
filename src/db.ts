@@ -159,6 +159,17 @@ export async function listFirmwareVersions(): Promise<FirmwareVersionRecord[]> {
   return result.firmware;
 }
 
+export async function loadFirmwareContent(firmwareId: string): Promise<Uint8Array> {
+  const response = await fetch(`/api/workspaces/${workspaceId()}/firmware/${encodeURIComponent(firmwareId)}/content`, {
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error || "无法读取固件内容");
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 export async function listDevices(): Promise<DeviceRecord[]> {
   const result = await requestJson<{ devices: DeviceRecord[] }>(
     `/api/workspaces/${workspaceId()}/devices`,

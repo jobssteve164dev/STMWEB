@@ -76,6 +76,7 @@ import {
 } from "./device-capabilities.js";
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
+import { InitialSwdFlashPanel } from "./InitialSwdFlashPanel.js";
 import { useLocale } from "./i18n.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
@@ -770,6 +771,9 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   telemetry={telemetrySnapshot}
                   isDemo={Boolean(connectionInfo?.isDemo)}
                   proAccess={planAccess.pro}
+                  connection={connectionRef.current}
+                  firmwareVersions={firmwareVersions}
+                  onEvent={appendEvent}
                   onChange={updateSelectedComponents}
                 />
               ) : connectionInfo ? (
@@ -843,6 +847,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
             <section className="page-section" aria-labelledby="firmware-heading">
               <div className="page-heading"><div><span className="panel-kicker">{c("版本化管理", "Versioned management")}</span><h1 id="firmware-heading">{c("固件制品", "Firmware artefacts")}</h1><p>{c("导入文件后计算 SHA-256，并完整保存到工作区数据库。", "Calculate SHA-256 on import and store the complete file in the workspace database.")}</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? c("正在校验", "Verifying…") : c("导入固件", "Import Firmware")}</button></div>
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
+              <InitialSwdFlashPanel />
               <div className="artifact-grid">
                 {combinedFirmware.map((version) => (
                   <article className="artifact-card" key={version.id}>
@@ -852,7 +857,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   </article>
                 ))}
               </div>
-              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("制品不会被原地覆盖", "Artefacts are never overwritten in place")}</strong><p>{c("同名文件也会作为新版本保存。当前版本仅保存和校验文件，暂不执行烧录。", "Files with the same name are saved as new versions. This release stores and verifies files but does not flash them.")}</p></div></div>
+              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("初始安装会先识别 SWD 芯片与容量；后续蓝牙烧录会重新核对应用分区和完整性。", "Initial installation checks the SWD target and capacity; later Bluetooth updates re-check the application partition and integrity.")}</p></div></div>
             </section>
           ) : null}
 

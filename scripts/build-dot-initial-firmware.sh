@@ -11,4 +11,8 @@ cmake -S "$repository_root/firmware-adapters/dot-v1" -B "$output_root" -G Ninja 
 cmake --build "$output_root" --parallel 1
 node "$repository_root/scripts/verify-dot-initial-firmware.mjs" "$output_root"
 
+public_firmware_root="$repository_root/public/firmware/dot-v1"
+cmake -E make_directory "$public_firmware_root"
+cmake -E copy_if_different "$output_root/dot_v1_initial_swd.hex" "$public_firmware_root/dot_v1_initial_swd.hex"
+
 printf 'DOT 初始 SWD 固件：%s\n' "$output_root/dot_v1_initial_swd.hex"

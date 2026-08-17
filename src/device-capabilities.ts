@@ -40,7 +40,7 @@ export const componentLabels: Record<DeviceCapabilityType, string> = {
   terminal: "调试终端",
   controls: "参数与控制",
   events: "事件记录",
-  firmware: "编译与烧录",
+  firmware: "固件与升级",
 };
 
 const knownTypes = new Set<DeviceCapabilityType>(Object.keys(componentLabels) as DeviceCapabilityType[]);

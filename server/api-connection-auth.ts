@@ -65,7 +65,7 @@ export async function resolveApiConnectionCredential(credential: string): Promis
 
 export function requiredApiScope(method: string, path: string): ApiScope | null {
   if (/\/devices$/.test(path)) return method === "GET" ? "devices:read" : "devices:control";
-  if (/\/firmware$/.test(path)) return method === "GET" ? "artifacts:read" : "builds:create";
+  if (/\/firmware(?:\/[^/]+\/content)?$/.test(path)) return method === "GET" ? "artifacts:read" : "builds:create";
   if (/\/sessions(?:\/|$)/.test(path)) return method === "GET" ? "debug:read" : "debug:execute";
   if (/\/workbench\//.test(path)) return method === "GET" ? "debug:read" : "debug:execute";
   if (/\/runners\/pairing$/.test(path)) return "runners:manage";

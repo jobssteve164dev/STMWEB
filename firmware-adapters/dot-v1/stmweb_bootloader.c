@@ -12,6 +12,7 @@
 #define STMWEB_FLASH_END 0x08020000u
 #define STMWEB_FLASH_PAGE_SIZE 1024u
 #define STMWEB_FLASH_SIZE_REGISTER 0x1FFFF7E0u
+#define STMWEB_STM32F103_MEDIUM_DEVICE_ID 0x410u
 
 #define FLASH_KEY1 0x45670123u
 #define FLASH_KEY2 0xCDEF89ABu
@@ -180,7 +181,7 @@ __attribute__((noreturn)) static void runApplication(void) {
 
 static uint32_t beginUpdate(const uint8_t *payload, uint16_t length) {
   if (length != 8u) return STMWEB_BOOT_STATUS_BAD_FRAME;
-  if (*(volatile uint16_t *)STMWEB_FLASH_SIZE_REGISTER < 128u) return STMWEB_BOOT_STATUS_BAD_TARGET;
+  if (*(volatile uint16_t *)STMWEB_FLASH_SIZE_REGISTER != 128u) return STMWEB_BOOT_STATUS_BAD_TARGET;
   expectedSize = readU32(payload);
   expectedCrc = readU32(payload + 4u);
   if (expectedSize == 0u || expectedSize > STMWEB_APP_LIMIT - STMWEB_APP_BASE) return STMWEB_BOOT_STATUS_BAD_TARGET;
@@ -198,6 +199,12 @@ static uint32_t beginUpdate(const uint8_t *payload, uint16_t length) {
 
 static uint32_t writeChunk(uint32_t offset, const uint8_t *payload, uint16_t length) {
   if (!updateActive) return STMWEB_BOOT_STATUS_BAD_STATE;
+  if (offset < nextOffset && offset + length == nextOffset) {
+    for (uint16_t index = 0; index < length; index++) {
+      if (*(volatile uint8_t *)(STMWEB_APP_BASE + offset + index) != payload[index]) return STMWEB_BOOT_STATUS_BAD_OFFSET;
+    }
+    return STMWEB_BOOT_STATUS_OK;
+  }
   if (offset != nextOffset || length == 0u || length > STMWEB_BOOT_MAX_PAYLOAD || offset + length > expectedSize) return STMWEB_BOOT_STATUS_BAD_OFFSET;
   if ((offset & 1u) != 0u || ((length & 1u) != 0u && offset + length != expectedSize)) return STMWEB_BOOT_STATUS_BAD_OFFSET;
   if (!flashProgram(STMWEB_APP_BASE + offset, payload, length)) return STMWEB_BOOT_STATUS_FLASH_ERROR;
@@ -218,13 +225,14 @@ static uint32_t finishUpdate(void) {
 
 static void handleFrame(const StmwebBootFrameHeader *header, const uint8_t *payload) {
   uint32_t status = STMWEB_BOOT_STATUS_BAD_FRAME;
-  uint8_t info[16];
+  uint8_t info[20];
   uint16_t infoLength = 0u;
   if (header->command == STMWEB_BOOT_COMMAND_HELLO) {
     writeU32(info, (uint32_t)*(volatile uint16_t *)STMWEB_FLASH_SIZE_REGISTER * 1024u);
     writeU32(info + 4u, STMWEB_APP_BASE);
     writeU32(info + 8u, STMWEB_APP_LIMIT - STMWEB_APP_BASE);
     writeU32(info + 12u, applicationLooksValid());
+    writeU32(info + 16u, STMWEB_STM32F103_MEDIUM_DEVICE_ID);
     infoLength = sizeof(info);
     status = STMWEB_BOOT_STATUS_OK;
   } else if (header->command == STMWEB_BOOT_COMMAND_BEGIN) {

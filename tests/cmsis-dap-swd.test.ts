@@ -69,8 +69,11 @@ class WrongTargetUsbProbe {
   claimedInterfaces: number[] = [];
   releasedInterfaces: number[] = [];
   targetWrites: number[] = [];
+  swdClocks: number[] = [];
   private packet = new Uint8Array();
   private tar = 0;
+
+  constructor(private transferStatus = 1) {}
 
   async open() { this.opened = true; }
   async close() { this.opened = false; }
@@ -82,6 +85,7 @@ class WrongTargetUsbProbe {
     this.packet = data instanceof ArrayBuffer
       ? new Uint8Array(data).slice()
       : new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+    if (this.packet[0] === 0x11) this.swdClocks.push(new DataView(this.packet.buffer, this.packet.byteOffset).getUint32(1, true));
     return { status: "ok" };
   }
   async transferIn(endpointNumber: number, length: number) {
@@ -95,7 +99,8 @@ class WrongTargetUsbProbe {
       const request = this.packet[3];
       const write = (request & 2) === 0;
       const value = new DataView(this.packet.buffer, this.packet.byteOffset).getUint32(4, true);
-      response[1] = 1; response[2] = 1;
+      response[1] = this.transferStatus === 1 ? 1 : 0; response[2] = this.transferStatus;
+      if (this.transferStatus !== 1) return { data: new DataView(response.buffer), status: "ok" };
       if (write && request === 0x05) this.tar = value;
       if (write && request === 0x0d) this.targetWrites.push(this.tar);
       let read = 0;
@@ -149,5 +154,25 @@ test("falls back to WebHID when no SLogic USB probe is selected", async () => {
   const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
   await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
   assert.equal(hidRequested, true);
+  assert.deepEqual(probe.targetWrites, []);
+});
+
+test("retries an unresponsive SWD target at lower clocks and reports wiring guidance", async () => {
+  const probe = new WrongTargetUsbProbe(0x07);
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      usb: {
+        async getDevices() { return [probe]; },
+        async requestDevice() { throw new Error("authorized probe should be reused"); },
+      },
+    },
+  });
+  const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
+  await assert.rejects(
+    () => flashDotInitialFirmware(firmware, () => undefined),
+    /目标芯片没有回应 SWD.*GND 共地.*TMS 接 SDIO\/SWDIO.*TCK 接 SCLK\/SWCLK/,
+  );
+  assert.deepEqual(probe.swdClocks, [1_000_000, 250_000, 50_000]);
   assert.deepEqual(probe.targetWrites, []);
 });

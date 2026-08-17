@@ -9,6 +9,8 @@ const DAP_SWJ_CLOCK = 0x11;
 const DAP_SWJ_SEQUENCE = 0x12;
 const DAP_SWD_CONFIGURE = 0x13;
 
+const SWD_CONNECT_CLOCKS = [1_000_000, 250_000, 50_000] as const;
+
 const DP_IDCODE_READ = 0x02;
 const DP_CTRL_STAT_READ = 0x06;
 const DP_CTRL_STAT_WRITE = 0x04;
@@ -84,6 +86,12 @@ interface CmsisDapPacketTransport {
   setMaxPacketSize(size: number): void;
   exchange(command: number, payload?: Uint8Array<ArrayBufferLike>, timeout?: number): Promise<Uint8Array>;
   close(): Promise<void>;
+}
+
+class SwdTransferError extends Error {
+  constructor(readonly status: number) {
+    super(`SWD 传输失败（状态 0x${status.toString(16)}）`);
+  }
 }
 
 export interface SwdFlashProgress {
@@ -280,7 +288,11 @@ class CmsisDap {
     if (packetSize[1] >= 2) this.transport.setMaxPacketSize(readU16(packetSize, 2));
     const connected = await this.exchange(DAP_CONNECT, new Uint8Array([1]));
     if (connected[1] !== 1) throw new Error("CMSIS-DAP 探针无法进入 SWD 模式");
-    await this.expectOk(DAP_SWJ_CLOCK, u32(1_000_000));
+    await this.configureSwd(SWD_CONNECT_CLOCKS[0]);
+  }
+
+  async configureSwd(clock: number) {
+    await this.expectOk(DAP_SWJ_CLOCK, u32(clock));
     await this.expectOk(DAP_TRANSFER_CONFIGURE, new Uint8Array([0, 100, 0, 0, 0]));
     await this.expectOk(DAP_SWD_CONFIGURE, new Uint8Array([0]));
     const sequence = new Uint8Array([136, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x9e, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00]);
@@ -295,7 +307,7 @@ class CmsisDap {
   async transfer(request: number, value?: number): Promise<number> {
     const payload = value === undefined ? new Uint8Array([0, 1, request]) : concat(new Uint8Array([0, 1, request]), u32(value));
     const response = await this.exchange(DAP_TRANSFER, payload);
-    if (response[1] !== 1 || (response[2] & 7) !== 1) throw new Error(`SWD 传输失败（状态 0x${(response[2] || 0).toString(16)}）`);
+    if (response[1] !== 1 || (response[2] & 7) !== 1) throw new SwdTransferError(response[2] || 0);
     return value === undefined ? readU32(response, 3) : 0;
   }
 
@@ -320,14 +332,26 @@ class Stm32Swd {
 
   async initialise() {
     await this.dap.initialise();
-    await this.dap.transfer(0x00, 0x1e);
-    await this.dap.transfer(DP_SELECT_WRITE, 0);
-    await this.dap.transfer(DP_CTRL_STAT_WRITE, 0x50000000);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const status = await this.dap.transfer(DP_CTRL_STAT_READ);
-      if (((status & 0xa0000000) >>> 0) === 0xa0000000) return;
+    for (const [index, clock] of SWD_CONNECT_CLOCKS.entries()) {
+      if (index > 0) await this.dap.configureSwd(clock);
+      try {
+        await this.dap.transfer(0x00, 0x1e);
+        await this.dap.transfer(DP_SELECT_WRITE, 0);
+        await this.dap.transfer(DP_CTRL_STAT_WRITE, 0x50000000);
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const status = await this.dap.transfer(DP_CTRL_STAT_READ);
+          if (((status & 0xa0000000) >>> 0) === 0xa0000000) return;
+        }
+        throw new Error("目标芯片 SWD 电源域未就绪");
+      } catch (error) {
+        if (!(error instanceof SwdTransferError) || error.status !== 0x07 || index === SWD_CONNECT_CLOCKS.length - 1) {
+          if (error instanceof SwdTransferError && error.status === 0x07) {
+            throw new Error("目标芯片没有回应 SWD：SWDIO 应答始终为高电平。请确认小车已供电且 3.3V 正常、探针与小车 GND 共地、TMS 接 SDIO/SWDIO、TCK 接 SCLK/SWCLK；5V、TDI、TDO 和 BOOT0 不参与连接。接线无误时，按一下小车 RESET 后重试");
+          }
+          throw error;
+        }
+      }
     }
-    throw new Error("目标芯片 SWD 电源域未就绪");
   }
 
   async idcode(): Promise<number> { return this.dap.transfer(DP_IDCODE_READ); }

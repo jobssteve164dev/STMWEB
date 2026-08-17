@@ -48,7 +48,42 @@ interface HidDeviceLike extends EventTarget {
 }
 
 interface HidNavigatorLike extends Navigator {
-  hid?: { requestDevice(options: { filters: Array<Record<string, number>> }): Promise<HidDeviceLike[]> };
+  hid?: {
+    getDevices?(): Promise<HidDeviceLike[]>;
+    requestDevice(options: { filters: Array<Record<string, number>> }): Promise<HidDeviceLike[]>;
+  };
+}
+
+interface UsbTransferInResultLike { data?: DataView; status?: string }
+interface UsbTransferOutResultLike { status?: string }
+interface UsbDeviceLike {
+  opened: boolean;
+  vendorId: number;
+  productId: number;
+  productName?: string;
+  configuration?: { configurationValue: number } | null;
+  open(): Promise<void>;
+  close(): Promise<void>;
+  selectConfiguration(configurationValue: number): Promise<void>;
+  claimInterface(interfaceNumber: number): Promise<void>;
+  releaseInterface(interfaceNumber: number): Promise<void>;
+  transferOut(endpointNumber: number, data: BufferSource): Promise<UsbTransferOutResultLike>;
+  transferIn(endpointNumber: number, length: number): Promise<UsbTransferInResultLike>;
+}
+
+interface UsbNavigatorLike extends Navigator {
+  usb?: {
+    getDevices(): Promise<UsbDeviceLike[]>;
+    requestDevice(options: { filters: Array<{ vendorId: number; productId: number }> }): Promise<UsbDeviceLike>;
+  };
+}
+
+interface CmsisDapPacketTransport {
+  readonly probeName: string;
+  readonly maxPacketSize: number;
+  setMaxPacketSize(size: number): void;
+  exchange(command: number, payload?: Uint8Array<ArrayBufferLike>, timeout?: number): Promise<Uint8Array>;
+  close(): Promise<void>;
 }
 
 export interface SwdFlashProgress {
@@ -136,7 +171,7 @@ export function parseDotInitialHex(source: string): ParsedInitialFirmware {
   return { image, programmedBytes };
 }
 
-class CmsisDapHid {
+class CmsisDapHidTransport implements CmsisDapPacketTransport {
   private packetSize = 64;
   private reportId = 0;
   private pending: { command: number; resolve: (value: Uint8Array) => void; reject: (error: Error) => void; timer: number } | null = null;
@@ -148,6 +183,8 @@ class CmsisDapHid {
     device.addEventListener("inputreport", this.handleInput as EventListener);
   }
 
+  get probeName() { return this.device.productName || "CMSIS-DAP"; }
+
   private handleInput = (event: HidInputReportEventLike) => {
     const bytes = Uint8Array.from(new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength));
     if (!this.pending || bytes[0] !== this.pending.command) return;
@@ -158,6 +195,7 @@ class CmsisDapHid {
   };
 
   get maxPacketSize() { return this.packetSize; }
+  setMaxPacketSize(size: number) { this.packetSize = Math.max(64, size); }
 
   async exchange(command: number, payload: Uint8Array<ArrayBufferLike> = new Uint8Array(), timeout = 5000): Promise<Uint8Array> {
     if (this.pending) throw new Error("CMSIS-DAP 探针仍有未完成请求");
@@ -180,9 +218,66 @@ class CmsisDapHid {
     }
   }
 
+  async close() {
+    this.device.removeEventListener("inputreport", this.handleInput as EventListener);
+    await this.device.close().catch(() => undefined);
+  }
+}
+
+class CmsisDapUsbTransport implements CmsisDapPacketTransport {
+  private packetSize = 64;
+
+  constructor(private device: UsbDeviceLike) {}
+
+  get probeName() { return this.device.productName || "CMSIS-DAP"; }
+  get maxPacketSize() { return this.packetSize; }
+  setMaxPacketSize(size: number) { this.packetSize = Math.max(64, size); }
+
+  async exchange(command: number, payload: Uint8Array<ArrayBufferLike> = new Uint8Array(), timeout = 5000): Promise<Uint8Array> {
+    if (payload.byteLength + 1 > this.packetSize) throw new Error("CMSIS-DAP 请求超过探针包长");
+    const packet = new Uint8Array(this.packetSize);
+    packet[0] = command;
+    packet.set(payload, 1);
+    let timer = 0;
+    const transfer = (async () => {
+      const write = await this.device.transferOut(1, packet);
+      if (write.status && write.status !== "ok") throw new Error(`CMSIS-DAP USB 写入失败（${write.status}）`);
+      const response = await this.device.transferIn(2, this.packetSize);
+      if (response.status && response.status !== "ok") throw new Error(`CMSIS-DAP USB 读取失败（${response.status}）`);
+      if (!response.data || response.data.byteLength === 0) throw new Error("CMSIS-DAP 探针返回了空响应");
+      const bytes = Uint8Array.from(new Uint8Array(response.data.buffer, response.data.byteOffset, response.data.byteLength));
+      if (bytes[0] !== command) throw new Error(`CMSIS-DAP 探针响应命令不匹配（收到 0x${(bytes[0] || 0).toString(16)}）`);
+      return bytes;
+    })();
+    const expired = new Promise<never>((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error("CMSIS-DAP 探针响应超时")), timeout);
+    });
+    try {
+      return await Promise.race([transfer, expired]);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  async close() {
+    await this.device.releaseInterface(0).catch(() => undefined);
+    await this.device.close().catch(() => undefined);
+  }
+}
+
+class CmsisDap {
+  constructor(private transport: CmsisDapPacketTransport) {}
+
+  get probeName() { return this.transport.probeName; }
+  get maxPacketSize() { return this.transport.maxPacketSize; }
+
+  async exchange(command: number, payload: Uint8Array<ArrayBufferLike> = new Uint8Array(), timeout = 5000) {
+    return this.transport.exchange(command, payload, timeout);
+  }
+
   async initialise() {
     const packetSize = await this.exchange(DAP_INFO, new Uint8Array([0xff]));
-    if (packetSize[1] >= 2) this.packetSize = Math.max(64, readU16(packetSize, 2));
+    if (packetSize[1] >= 2) this.transport.setMaxPacketSize(readU16(packetSize, 2));
     const connected = await this.exchange(DAP_CONNECT, new Uint8Array([1]));
     if (connected[1] !== 1) throw new Error("CMSIS-DAP 探针无法进入 SWD 模式");
     await this.expectOk(DAP_SWJ_CLOCK, u32(1_000_000));
@@ -217,14 +312,11 @@ class CmsisDapHid {
 
   async disconnect() { await this.exchange(DAP_DISCONNECT).catch(() => undefined); }
   async resetTarget() { await this.exchange(DAP_RESET_TARGET).catch(() => undefined); }
-  async close() {
-    this.device.removeEventListener("inputreport", this.handleInput as EventListener);
-    await this.device.close().catch(() => undefined);
-  }
+  async close() { await this.transport.close(); }
 }
 
 class Stm32Swd {
-  constructor(private dap: CmsisDapHid) {}
+  constructor(private dap: CmsisDap) {}
 
   async initialise() {
     await this.dap.initialise();
@@ -304,14 +396,51 @@ class Stm32Swd {
   }
 }
 
-async function requestProbe(): Promise<HidDeviceLike> {
+const SLOGIC_COMBO8_VENDOR_ID = 0xd6e7;
+const SLOGIC_COMBO8_PRODUCT_ID = 0x3507;
+
+async function openUsbProbe(device: UsbDeviceLike): Promise<CmsisDapPacketTransport> {
+  if (!device.opened) await device.open();
+  if (!device.configuration) await device.selectConfiguration(1);
+  try {
+    await device.claimInterface(0);
+  } catch (error) {
+    await device.close().catch(() => undefined);
+    throw error;
+  }
+  return new CmsisDapUsbTransport(device);
+}
+
+async function openHidProbe(device: HidDeviceLike): Promise<CmsisDapPacketTransport> {
+  if (!device.opened) await device.open();
+  return new CmsisDapHidTransport(device);
+}
+
+async function requestProbe(): Promise<CmsisDapPacketTransport> {
+  const usb = (navigator as UsbNavigatorLike).usb;
   const hid = (navigator as HidNavigatorLike).hid;
-  if (!hid) throw new Error("当前浏览器不支持 WebHID，无法连接 SWD 探针");
+
+  if (usb) {
+    const authorized = (await usb.getDevices()).find((device) => device.vendorId === SLOGIC_COMBO8_VENDOR_ID && device.productId === SLOGIC_COMBO8_PRODUCT_ID);
+    if (authorized) return openUsbProbe(authorized);
+  }
+  if (hid?.getDevices) {
+    const authorized = (await hid.getDevices()).find((device) => /cmsis.?dap|daplink/i.test(device.productName || ""));
+    if (authorized) return openHidProbe(authorized);
+  }
+  if (usb) {
+    try {
+      const device = await usb.requestDevice({ filters: [{ vendorId: SLOGIC_COMBO8_VENDOR_ID, productId: SLOGIC_COMBO8_PRODUCT_ID }] });
+      return await openUsbProbe(device);
+    } catch (error) {
+      if (!(error instanceof DOMException) || error.name !== "NotFoundError") throw error;
+    }
+  }
+  if (!hid) throw new Error("当前浏览器不支持可用的 USB 调试探针连接方式");
   const devices = await hid.requestDevice({ filters: [] });
   const device = devices[0];
   if (!device) throw new Error("没有选择 CMSIS-DAP 调试探针");
-  if (!device.opened) await device.open();
-  return device;
+  return openHidProbe(device);
 }
 
 export async function flashDotInitialFirmware(
@@ -319,8 +448,8 @@ export async function flashDotInitialFirmware(
   onProgress: (progress: SwdFlashProgress) => void,
 ): Promise<SwdFlashResult> {
   onProgress({ stage: "connecting", percent: 1, detail: "正在连接 CMSIS-DAP 探针" });
-  const device = await requestProbe();
-  const dap = new CmsisDapHid(device);
+  const transport = await requestProbe();
+  const dap = new CmsisDap(transport);
   const swd = new Stm32Swd(dap);
   try {
     await swd.initialise();
@@ -391,7 +520,7 @@ export async function flashDotInitialFirmware(
     await swd.write32(CORTEX_AIRCR, 0x05fa0004).catch(() => undefined);
     await dap.resetTarget();
     onProgress({ stage: "restarting", percent: 100, detail: "初始固件已写入" });
-    return { probeName: device.productName || "CMSIS-DAP", deviceId, flashSize: flashKilobytes * 1024, programmedBytes: firmware.programmedBytes };
+    return { probeName: dap.probeName, deviceId, flashSize: flashKilobytes * 1024, programmedBytes: firmware.programmedBytes };
   } finally {
     await dap.disconnect();
     await dap.close();

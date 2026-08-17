@@ -59,3 +59,95 @@ test("checks SWD chip identity before any target flash write", async () => {
   await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
   assert.deepEqual(probe.targetWrites, []);
 });
+
+class WrongTargetUsbProbe {
+  opened = false;
+  vendorId = 0xd6e7;
+  productId = 0x3507;
+  productName = "SLogic Combo8";
+  configuration: { configurationValue: number } | null = null;
+  claimedInterfaces: number[] = [];
+  releasedInterfaces: number[] = [];
+  targetWrites: number[] = [];
+  private packet = new Uint8Array();
+  private tar = 0;
+
+  async open() { this.opened = true; }
+  async close() { this.opened = false; }
+  async selectConfiguration(configurationValue: number) { this.configuration = { configurationValue }; }
+  async claimInterface(interfaceNumber: number) { this.claimedInterfaces.push(interfaceNumber); }
+  async releaseInterface(interfaceNumber: number) { this.releasedInterfaces.push(interfaceNumber); }
+  async transferOut(endpointNumber: number, data: BufferSource) {
+    assert.equal(endpointNumber, 1);
+    this.packet = data instanceof ArrayBuffer
+      ? new Uint8Array(data).slice()
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+    return { status: "ok" };
+  }
+  async transferIn(endpointNumber: number, length: number) {
+    assert.equal(endpointNumber, 2);
+    const response = new Uint8Array(length);
+    response[0] = this.packet[0];
+    if (this.packet[0] === 0x00) { response[1] = 2; response[2] = 64; }
+    else if (this.packet[0] === 0x02) response[1] = 1;
+    else if ([0x04, 0x11, 0x12, 0x13].includes(this.packet[0])) response[1] = 0;
+    else if (this.packet[0] === 0x05) {
+      const request = this.packet[3];
+      const write = (request & 2) === 0;
+      const value = new DataView(this.packet.buffer, this.packet.byteOffset).getUint32(4, true);
+      response[1] = 1; response[2] = 1;
+      if (write && request === 0x05) this.tar = value;
+      if (write && request === 0x0d) this.targetWrites.push(this.tar);
+      let read = 0;
+      if (!write && request === 0x06) read = 0xa0000000;
+      else if (!write && request === 0x02) read = 0x2ba01477;
+      else if (!write && request === 0x0f && this.tar === 0xe0042000) read = 0x411;
+      else if (!write && request === 0x0f && this.tar === 0x1ffff7e0) read = 64;
+      new DataView(response.buffer).setUint32(3, read, true);
+    }
+    return { data: new DataView(response.buffer), status: "ok" };
+  }
+}
+
+test("uses CMSIS-DAP v2 bulk endpoints for SLogic Combo8 and keeps the chip guard", async () => {
+  const probe = new WrongTargetUsbProbe();
+  let requestedOptions: unknown;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      usb: {
+        async getDevices() { return []; },
+        async requestDevice(options: unknown) { requestedOptions = options; return probe; },
+      },
+    },
+  });
+  const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
+  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
+  assert.deepEqual(requestedOptions, { filters: [{ vendorId: 0xd6e7, productId: 0x3507 }] });
+  assert.deepEqual(probe.claimedInterfaces, [0]);
+  assert.deepEqual(probe.releasedInterfaces, [0]);
+  assert.deepEqual(probe.targetWrites, []);
+  assert.equal(probe.opened, false);
+});
+
+test("falls back to WebHID when no SLogic USB probe is selected", async () => {
+  const probe = new WrongTargetProbe();
+  let hidRequested = false;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      usb: {
+        async getDevices() { return []; },
+        async requestDevice() { throw new DOMException("No device selected", "NotFoundError"); },
+      },
+      hid: {
+        async getDevices() { return []; },
+        async requestDevice() { hidRequested = true; return [probe]; },
+      },
+    },
+  });
+  const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
+  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
+  assert.equal(hidRequested, true);
+  assert.deepEqual(probe.targetWrites, []);
+});

@@ -37,7 +37,7 @@ void MYRCC_DeInit(void) {
   RCC->APB2ENR = 0; RCC->APB1ENR = 0; RCC->CR |= 1u;
   RCC->CFGR &= 0xF8FF0000u; RCC->CR &= 0xFEF6FFFFu;
   RCC->CR &= 0xFFFBFFFFu; RCC->CFGR &= 0xFF80FFFFu; RCC->CIR = 0;
-  MY_NVIC_SetVectorTable(0x08000000u, 0);
+  MY_NVIC_SetVectorTable(STMWEB_APPLICATION_BASE, 0);
 }
 
 void Sys_Standby(void) {

@@ -15,8 +15,10 @@ project(dot_v1_gcc C ASM)
 set(STMWEB_TARGET "${STMWEB_TARGET}" CACHE STRING "STM32 target")
 if(STMWEB_TARGET STREQUAL "stm32f103c8")
   set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103x8.ld")
+  set(STMWEB_INITIAL_SWD_FIRMWARE OFF)
 else()
-  set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103xb.ld")
+  set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103cb_app.ld")
+  set(STMWEB_INITIAL_SWD_FIRMWARE ON)
 endif()
 
 if(NOT DEFINED STMWEB_SOURCE_ROOT)
@@ -60,6 +62,14 @@ endforeach()
 add_executable(dot_v1.elf ${DOT_SOURCES})
 set_source_files_properties("${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/DataScope_DP/DataScope_DP.C" PROPERTIES LANGUAGE C)
 
+if(STMWEB_INITIAL_SWD_FIRMWARE)
+  target_sources(dot_v1.elf PRIVATE "${CMAKE_CURRENT_LIST_DIR}/stmweb_ota_bridge.c")
+  set_source_files_properties(
+    "${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/USART3/usart3.c"
+    PROPERTIES COMPILE_DEFINITIONS "communication=legacy_communication"
+  )
+endif()
+
 target_include_directories(dot_v1.elf PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}"
   "${STMWEB_SOURCE_ROOT}/USER" "${STMWEB_SOURCE_ROOT}/DOT_COER"
@@ -80,9 +90,12 @@ target_include_directories(dot_v1.elf PRIVATE
   "${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/VL53L0X/demo" "${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/USART2"
 )
 
-target_compile_definitions(dot_v1.elf PRIVATE STM32F10X_HD USE_STDPERIPH_DRIVER)
+target_compile_definitions(dot_v1.elf PRIVATE
+  STM32F10X_HD USE_STDPERIPH_DRIVER
+  $<$<BOOL:${STMWEB_INITIAL_SWD_FIRMWARE}>:STMWEB_APPLICATION_BASE=0x08004000u>
+)
 target_compile_options(dot_v1.elf PRIVATE
-  -mcpu=cortex-m3 -mthumb -ffunction-sections -fdata-sections -fno-common
+  -mcpu=cortex-m3 -mthumb -Os -ffunction-sections -fdata-sections -fno-common
   -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-error=implicit-int
   "$<$<COMPILE_LANGUAGE:C>:-include${CMAKE_CURRENT_LIST_DIR}/gcc_compat.h>"
 )
@@ -100,3 +113,45 @@ add_custom_command(TARGET dot_v1.elf POST_BUILD
   COMMAND ${ARM_SIZE} $<TARGET_FILE:dot_v1.elf>
   VERBATIM
 )
+
+if(STMWEB_INITIAL_SWD_FIRMWARE)
+  add_executable(dot_v1_bootloader.elf
+    "${CMAKE_CURRENT_LIST_DIR}/startup_stm32f103xb_gcc.s"
+    "${STMWEB_SOURCE_ROOT}/USER/system_stm32f10x.c"
+    "${CMAKE_CURRENT_LIST_DIR}/stmweb_bootloader.c"
+  )
+  target_include_directories(dot_v1_bootloader.elf PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}"
+    "${STMWEB_SOURCE_ROOT}/USER"
+    "${STMWEB_SOURCE_ROOT}/DOT_COER"
+  )
+  target_compile_definitions(dot_v1_bootloader.elf PRIVATE STM32F10X_MD)
+  target_compile_options(dot_v1_bootloader.elf PRIVATE
+    -mcpu=cortex-m3 -mthumb -Os -ffreestanding -ffunction-sections -fdata-sections
+    -Wall -Wextra -Werror
+  )
+  target_link_options(dot_v1_bootloader.elf PRIVATE
+    -mcpu=cortex-m3 -mthumb
+    "-T${CMAKE_CURRENT_LIST_DIR}/stm32f103cb_bootloader.ld"
+    -nostartfiles
+    -Wl,--gc-sections -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/dot_v1_bootloader.map
+  )
+  target_link_libraries(dot_v1_bootloader.elf PRIVATE c nosys)
+
+  add_custom_command(TARGET dot_v1_bootloader.elf POST_BUILD
+    COMMAND ${ARM_OBJCOPY} -O ihex $<TARGET_FILE:dot_v1_bootloader.elf> ${CMAKE_CURRENT_BINARY_DIR}/dot_v1_bootloader.hex
+    COMMAND ${ARM_OBJCOPY} -O binary --remove-section=.factory_metadata $<TARGET_FILE:dot_v1_bootloader.elf> ${CMAKE_CURRENT_BINARY_DIR}/dot_v1_bootloader.bin
+    COMMAND ${ARM_SIZE} $<TARGET_FILE:dot_v1_bootloader.elf>
+    VERBATIM
+  )
+
+  add_custom_target(dot_v1_initial_swd ALL
+    DEPENDS dot_v1.elf dot_v1_bootloader.elf
+    COMMAND ${CMAKE_COMMAND}
+      -DBOOTLOADER_HEX=${CMAKE_CURRENT_BINARY_DIR}/dot_v1_bootloader.hex
+      -DAPPLICATION_HEX=${CMAKE_CURRENT_BINARY_DIR}/dot_v1.hex
+      -DOUTPUT_HEX=${CMAKE_CURRENT_BINARY_DIR}/dot_v1_initial_swd.hex
+      -P ${CMAKE_CURRENT_LIST_DIR}/merge_hex.cmake
+    VERBATIM
+  )
+endif()

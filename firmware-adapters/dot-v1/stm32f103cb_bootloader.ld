@@ -2,26 +2,24 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 128K
-  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 20K
+  BOOT (rx)   : ORIGIN = 0x08000000, LENGTH = 16K
+  META (rx)   : ORIGIN = 0x0801FC00, LENGTH = 1K
+  RAM  (rwx)  : ORIGIN = 0x20000000, LENGTH = 20K
 }
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
-_flash_start = ORIGIN(FLASH);
-_Min_Heap_Size = 0x200;
-_Min_Stack_Size = 0x400;
+_flash_start = ORIGIN(BOOT);
 
 SECTIONS
 {
-  .isr_vector : { KEEP(*(.isr_vector)) } > FLASH
+  .isr_vector : { KEEP(*(.isr_vector)) } > BOOT
   .text :
   {
     *(.text*) *(.rodata*)
-    KEEP(*(.init)) KEEP(*(.fini))
     . = ALIGN(4);
     _etext = .;
-  } > FLASH
-  .ARM.extab : { *(.ARM.extab* .gnu.linkonce.armextab.*) } > FLASH
+  } > BOOT
+  .ARM.extab : { *(.ARM.extab* .gnu.linkonce.armextab.*) } > BOOT
   .ARM.exidx :
   {
     __exidx_start = .;
@@ -29,7 +27,7 @@ SECTIONS
     __exidx_end = .;
     . = ALIGN(4);
     _sidata = .;
-  } > FLASH
+  } > BOOT
   .data : AT(_sidata)
   {
     . = ALIGN(4); _sdata = .;
@@ -41,14 +39,10 @@ SECTIONS
     . = ALIGN(4); _sbss = .;
     *(.bss*) *(COMMON)
     . = ALIGN(4); _ebss = .;
-    end = .;
   } > RAM
-  ._user_heap_stack (NOLOAD) :
+  .factory_metadata :
   {
-    . = ALIGN(8);
-    . += _Min_Heap_Size;
-    . += _Min_Stack_Size;
-    . = ALIGN(8);
-  } > RAM
+    KEEP(*(.factory_metadata))
+  } > META
   /DISCARD/ : { *(.note*) *(.comment*) }
 }

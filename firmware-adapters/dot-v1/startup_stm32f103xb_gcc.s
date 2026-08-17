@@ -55,6 +55,11 @@ Reset_Handler:
   strlt r3, [r1], #4
   blt 2b
   bl SystemInit
+  ldr r0, =_flash_start
+  ldr r1, =0xE000ED08
+  str r0, [r1]
+  dsb
+  isb
   bl main
 3: b 3b
 .size Reset_Handler, .-Reset_Handler

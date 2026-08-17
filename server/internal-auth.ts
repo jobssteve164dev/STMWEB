@@ -3,7 +3,17 @@ import type { NextFunction, Request, Response } from "express";
 import express from "express";
 import { pool } from "./database.js";
 import { env } from "./env.js";
-import { linkPassportIdentity, loginWithPassport, PassportError } from "./passport.js";
+import {
+  linkPassportIdentity,
+  loginWithPassport,
+  PassportError,
+  registerWithPassport,
+  requestPassportPasswordReset,
+  resendPassportVerification,
+  resetPassportPassword,
+  verifyPassportEmail,
+  type PassportUser,
+} from "./passport.js";
 
 const COOKIE_NAME = "stmweb_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
@@ -45,6 +55,10 @@ function cookieOptions() {
   };
 }
 
+function normalizeEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 async function upsertPassportUser(user: { id: string; email: string; name: string | null }): Promise<InternalUser> {
   const existing = await pool.query<{ id: string }>(
     `SELECT id FROM internal_users WHERE passport_user_id=$1 OR username=$2 ORDER BY passport_user_id=$1 DESC LIMIT 1`,
@@ -66,6 +80,35 @@ async function upsertPassportUser(user: { id: string; email: string; name: strin
     [user.email, user.name ?? user.email.split("@")[0], user.id],
   );
   return created.rows[0];
+}
+
+async function completeAuthentication(user: PassportUser, response: Response) {
+  const account = await upsertPassportUser(user);
+  await linkPassportIdentity(user, account.id);
+  const token = randomBytes(32).toString("base64url");
+  await pool.query(
+    `INSERT INTO internal_sessions (user_id, token_hash, expires_at)
+     VALUES ($1, $2, now() + interval '7 days')`,
+    [account.id, tokenHash(token)],
+  );
+  response.cookie(COOKIE_NAME, token, cookieOptions());
+  return response.json({ user: account });
+}
+
+function passportFailure(response: Response, error: PassportError, fallback: string) {
+  if (["auth_invalid_credentials", "auth_user_not_found"].includes(error.code)) {
+    return response.status(401).json({ error: "邮箱或密码不正确" });
+  }
+  if (error.code === "auth_email_exists" || error.status === 409) {
+    return response.status(409).json({ error: "这个邮箱已经注册，请直接登录" });
+  }
+  if (error.code === "auth_rate_limited" || error.status === 429) {
+    return response.status(429).json({ error: "尝试次数过多，请稍后再试" });
+  }
+  if (error.code === "auth_invalid_token" || error.status === 400) {
+    return response.status(400).json({ error: "链接无效或已经过期，请重新获取" });
+  }
+  return response.status(503).json({ error: fallback });
 }
 
 export async function ensureBootstrapUser(): Promise<void> {
@@ -106,7 +149,7 @@ internalAuthRouter.post("/login", async (request, response, next) => {
     if (rate && rate.resetAt > now && rate.count >= 10) {
       return response.status(429).json({ error: "尝试次数过多，请稍后再试" });
     }
-    const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
+    const email = normalizeEmail(request.body?.email);
     const password = typeof request.body?.password === "string" ? request.body.password : "";
     if (!email || !password) return response.status(400).json({ error: "请填写邮箱和密码" });
     let passport;
@@ -114,25 +157,12 @@ internalAuthRouter.post("/login", async (request, response, next) => {
       passport = await loginWithPassport(email, password);
     } catch (error) {
       attempts.set(key, { count: rate?.resetAt && rate.resetAt > now ? rate.count + 1 : 1, resetAt: now + 60_000 });
-      if (error instanceof PassportError && ["auth_invalid_credentials", "auth_user_not_found"].includes(error.code)) {
-        return response.status(401).json({ error: "邮箱或密码不正确" });
-      }
-      if (error instanceof PassportError && error.status === 429) return response.status(429).json({ error: "尝试次数过多，请稍后再试" });
+      if (error instanceof PassportError) return passportFailure(response, error, "账号服务暂时不可用，请稍后再试");
       return response.status(503).json({ error: "账号服务暂时不可用，请稍后再试" });
     }
-    if (passport.needsEmailVerification) return response.status(409).json({ error: "请先完成邮箱验证，再回来登录" });
-    const user = passport.user;
-    const account = await upsertPassportUser(user);
-    await linkPassportIdentity(user, account.id);
+    if (passport.needsEmailVerification) return response.status(409).json({ error: "请先完成邮箱验证，再回来登录", code: "email_verification_required", email });
     attempts.delete(key);
-    const token = randomBytes(32).toString("base64url");
-    await pool.query(
-      `INSERT INTO internal_sessions (user_id, token_hash, expires_at)
-       VALUES ($1, $2, now() + interval '7 days')`,
-      [account.id, tokenHash(token)],
-    );
-    response.cookie(COOKIE_NAME, token, cookieOptions());
-    return response.json({ user: account });
+    return await completeAuthentication(passport.user, response);
   } catch (error) {
     console.error("[STMWEB] Passport login completion failed", error instanceof PassportError ? {
       code: error.code,
@@ -144,6 +174,73 @@ internalAuthRouter.post("/login", async (request, response, next) => {
       elapsedMs: typeof error.details?.elapsedMs === "number" ? error.details.elapsedMs : null,
     } : error);
     if (error instanceof PassportError) return response.status(503).json({ error: "账号登录没有完成，请稍后再试" });
+    return next(error);
+  }
+});
+
+internalAuthRouter.post("/register", async (request, response, next) => {
+  try {
+    if (!verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
+    const email = normalizeEmail(request.body?.email);
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    const name = typeof request.body?.name === "string" ? request.body.name.trim().slice(0, 80) : "";
+    if (!email || !password) return response.status(400).json({ error: "请填写邮箱和密码" });
+    if (password.length < 8) return response.status(400).json({ error: "密码至少需要 8 位" });
+    const result = await registerWithPassport(email, password, name || null);
+    return response.json({ success: true, needsEmailVerification: result.needsEmailVerification, email });
+  } catch (error) {
+    if (error instanceof PassportError) return passportFailure(response, error, "注册没有完成，请稍后再试");
+    return next(error);
+  }
+});
+
+internalAuthRouter.post("/resend-verification", async (request, response, next) => {
+  try {
+    if (!verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
+    const email = normalizeEmail(request.body?.email);
+    if (!email) return response.status(400).json({ error: "请填写邮箱" });
+    await resendPassportVerification(email);
+    return response.json({ success: true });
+  } catch (error) {
+    if (error instanceof PassportError) return passportFailure(response, error, "验证邮件没有发送成功，请稍后再试");
+    return next(error);
+  }
+});
+
+internalAuthRouter.post("/forgot-password", async (request, response, next) => {
+  try {
+    if (!verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
+    const email = normalizeEmail(request.body?.email);
+    if (!email) return response.status(400).json({ error: "请填写邮箱" });
+    await requestPassportPasswordReset(email);
+    return response.json({ success: true });
+  } catch (error) {
+    if (error instanceof PassportError) return passportFailure(response, error, "重置邮件没有发送成功，请稍后再试");
+    return next(error);
+  }
+});
+
+internalAuthRouter.post("/verify-email", async (request, response, next) => {
+  try {
+    if (!verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
+    const token = typeof request.body?.token === "string" ? request.body.token.trim() : "";
+    if (!token) return response.status(400).json({ error: "验证链接不完整，请重新获取验证邮件" });
+    return await completeAuthentication(await verifyPassportEmail(token), response);
+  } catch (error) {
+    if (error instanceof PassportError) return passportFailure(response, error, "邮箱验证没有完成，请稍后再试");
+    return next(error);
+  }
+});
+
+internalAuthRouter.post("/reset-password", async (request, response, next) => {
+  try {
+    if (!verifyOrigin(request)) return response.status(403).json({ error: "请求来源未获授权" });
+    const token = typeof request.body?.token === "string" ? request.body.token.trim() : "";
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    if (!token || password.length < 8) return response.status(400).json({ error: "请使用有效链接，并设置至少 8 位的新密码" });
+    return await completeAuthentication(await resetPassportPassword(token, password), response);
+  } catch (error) {
+    if (error instanceof PassportError) return passportFailure(response, error, "密码重置没有完成，请稍后再试");
     return next(error);
   }
 });

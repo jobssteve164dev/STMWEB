@@ -26,6 +26,44 @@ test("uses SZLKPassport v1 envelope and product authentication for login", async
   assert.equal(headers["X-SZLK-Secret"], "product-secret");
 });
 
+test("uses the Passport headless registration and password recovery contract", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    calls.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    const data = path.endsWith("/auth/register")
+      ? { needsEmailVerification: true }
+      : path.endsWith("/auth/verify-email") || path.endsWith("/auth/reset-password")
+        ? { user: { id: "passport-2", email: "USER@example.com", name: "用户" } }
+        : {};
+    return new Response(JSON.stringify({ ok: true, data }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const {
+    registerWithPassport,
+    requestPassportPasswordReset,
+    resendPassportVerification,
+    resetPassportPassword,
+    verifyPassportEmail,
+  } = await import("../server/passport.js");
+
+  assert.deepEqual(await registerWithPassport("user@example.com", "password", "用户"), { needsEmailVerification: true });
+  await resendPassportVerification("user@example.com");
+  await requestPassportPasswordReset("user@example.com");
+  assert.equal((await verifyPassportEmail("verify-token")).email, "user@example.com");
+  assert.equal((await resetPassportPassword("reset-token", "new-password")).id, "passport-2");
+
+  assert.deepEqual(calls, [
+    { path: "/api/v1/auth/register", body: { email: "user@example.com", password: "password", name: "用户", appBaseUrl: "https://stmweb.example" } },
+    { path: "/api/v1/auth/resend-verification", body: { email: "user@example.com", appBaseUrl: "https://stmweb.example" } },
+    { path: "/api/v1/auth/forgot-password", body: { email: "user@example.com", appBaseUrl: "https://stmweb.example" } },
+    { path: "/api/v1/auth/verify-email", body: { token: "verify-token" } },
+    { path: "/api/v1/auth/reset-password", body: { token: "reset-token", password: "new-password" } },
+  ]);
+});
+
 test("creates checkout only for a plan returned by the Passport catalog", async () => {
   const paths: string[] = [];
   let checkoutBody: Record<string, unknown> | undefined;

@@ -93,6 +93,8 @@ function CurrentRoute() {
   const path = route.path;
   if (path === "/") return <LandingPage />;
   if (path === "/workbench") return <AuthenticatedApp />;
+  if (path === "/verify-email") return <AuthenticatedApp initialAuthMode="verify" />;
+  if (path === "/reset-password") return <AuthenticatedApp initialAuthMode="reset" />;
   if (path === "/plans") return <PlansPage />;
   const legalSlug = path.slice(1);
   if (["terms", "privacy", "cookie-policy", "refund-policy", "data-rights", "do-not-sell", "ai-disclaimer", "legal-supplement"].includes(legalSlug)) return <LegalPage slug={legalSlug} />;

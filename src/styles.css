@@ -215,6 +215,53 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(49, 189, 190, 0.12);
 }
 
+.login-switch {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.login-switch button,
+.login-secondary {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-switch button:hover:not(:disabled),
+.login-secondary:hover:not(:disabled) {
+  color: #8df1dd;
+}
+
+.login-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.login-actions .github-login {
+  margin-top: 0;
+}
+
+.login-secondary,
+.login-status {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-status {
+  margin-top: 28px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
 .account-button {
   display: flex;
   align-items: center;

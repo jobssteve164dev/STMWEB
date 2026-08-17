@@ -80,6 +80,42 @@ export async function loginWithPassport(email: string, password: string) {
   return { user: readUser(result), needsEmailVerification: result.needsEmailVerification === true };
 }
 
+function appBaseUrl(): string {
+  return new URL(env.BETTER_AUTH_URL).origin;
+}
+
+export async function registerWithPassport(email: string, password: string, name: string | null) {
+  const result = await passportRequest("auth/register", {
+    method: "POST",
+    body: { email, password, name, appBaseUrl: appBaseUrl() },
+  });
+  return { needsEmailVerification: result.needsEmailVerification === true };
+}
+
+export function resendPassportVerification(email: string) {
+  return passportRequest("auth/resend-verification", {
+    method: "POST",
+    body: { email, appBaseUrl: appBaseUrl() },
+  });
+}
+
+export function requestPassportPasswordReset(email: string) {
+  return passportRequest("auth/forgot-password", {
+    method: "POST",
+    body: { email, appBaseUrl: appBaseUrl() },
+  });
+}
+
+export async function verifyPassportEmail(token: string) {
+  const result = await passportRequest("auth/verify-email", { method: "POST", body: { token } });
+  return readUser(result);
+}
+
+export async function resetPassportPassword(token: string, password: string) {
+  const result = await passportRequest("auth/reset-password", { method: "POST", body: { token, password } });
+  return readUser(result);
+}
+
 export async function linkPassportIdentity(user: PassportUser, productUserId: string) {
   await passportRequest("passport/link", { method: "POST", body: {
     email: user.email,

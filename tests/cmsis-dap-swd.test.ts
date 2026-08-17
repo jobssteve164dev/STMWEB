@@ -70,6 +70,7 @@ class WrongTargetUsbProbe {
   releasedInterfaces: number[] = [];
   targetWrites: number[] = [];
   swdClocks: number[] = [];
+  transferRequests: number[] = [];
   private packet = new Uint8Array();
   private tar = 0;
 
@@ -86,6 +87,7 @@ class WrongTargetUsbProbe {
       ? new Uint8Array(data).slice()
       : new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
     if (this.packet[0] === 0x11) this.swdClocks.push(new DataView(this.packet.buffer, this.packet.byteOffset).getUint32(1, true));
+    if (this.packet[0] === 0x05) this.transferRequests.push(this.packet[3]);
     return { status: "ok" };
   }
   async transferIn(endpointNumber: number, length: number) {
@@ -131,6 +133,7 @@ test("uses CMSIS-DAP v2 bulk endpoints for SLogic Combo8 and keeps the chip guar
   assert.deepEqual(requestedOptions, { filters: [{ vendorId: 0xd6e7, productId: 0x3507 }] });
   assert.deepEqual(probe.claimedInterfaces, [0]);
   assert.deepEqual(probe.releasedInterfaces, [0]);
+  assert.equal(probe.transferRequests[0], 0x02);
   assert.deepEqual(probe.targetWrites, []);
   assert.equal(probe.opened, false);
 });

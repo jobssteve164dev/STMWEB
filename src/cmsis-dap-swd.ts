@@ -330,17 +330,19 @@ class CmsisDap {
 class Stm32Swd {
   constructor(private dap: CmsisDap) {}
 
-  async initialise() {
+  async initialise(): Promise<number> {
     await this.dap.initialise();
     for (const [index, clock] of SWD_CONNECT_CLOCKS.entries()) {
       if (index > 0) await this.dap.configureSwd(clock);
       try {
+        // ARM requires DPIDR to be the first transfer after an SWD line reset.
+        const debugPortId = await this.dap.transfer(DP_IDCODE_READ);
         await this.dap.transfer(0x00, 0x1e);
         await this.dap.transfer(DP_SELECT_WRITE, 0);
         await this.dap.transfer(DP_CTRL_STAT_WRITE, 0x50000000);
         for (let attempt = 0; attempt < 100; attempt += 1) {
           const status = await this.dap.transfer(DP_CTRL_STAT_READ);
-          if (((status & 0xa0000000) >>> 0) === 0xa0000000) return;
+          if (((status & 0xa0000000) >>> 0) === 0xa0000000) return debugPortId;
         }
         throw new Error("目标芯片 SWD 电源域未就绪");
       } catch (error) {
@@ -352,9 +354,9 @@ class Stm32Swd {
         }
       }
     }
-  }
 
-  async idcode(): Promise<number> { return this.dap.transfer(DP_IDCODE_READ); }
+    throw new Error("无法初始化 SWD 连接");
+  }
 
   private async setAccess(size: 0 | 1 | 2) {
     await this.dap.transfer(DP_SELECT_WRITE, 0);
@@ -476,9 +478,8 @@ export async function flashDotInitialFirmware(
   const dap = new CmsisDap(transport);
   const swd = new Stm32Swd(dap);
   try {
-    await swd.initialise();
+    const debugPortId = await swd.initialise();
     onProgress({ stage: "checking", percent: 3, detail: "正在读取芯片型号和 Flash 容量" });
-    const debugPortId = await swd.idcode();
     const deviceId = await swd.read32(STM32_DBGMCU_IDCODE);
     const flashKilobytes = await swd.read16(STM32_FLASH_SIZE_REGISTER);
     if (debugPortId === 0 || debugPortId === 0xffffffff) throw new Error("SWD 已连接，但没有读到有效调试端口");

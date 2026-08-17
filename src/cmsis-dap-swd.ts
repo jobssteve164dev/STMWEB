@@ -107,6 +107,11 @@ export interface SwdFlashResult {
   programmedBytes: number;
 }
 
+export interface SwdResetConnection {
+  holdReset(): Promise<void>;
+  releaseReset(targetDetected: boolean): Promise<void>;
+}
+
 export interface ParsedInitialFirmware {
   image: Uint8Array;
   programmedBytes: number;
@@ -330,32 +335,56 @@ class CmsisDap {
 class Stm32Swd {
   constructor(private dap: CmsisDap) {}
 
-  async initialise(): Promise<number> {
-    await this.dap.initialise();
+  private async powerUpDebugPort(debugPortId: number): Promise<number> {
+    await this.dap.transfer(0x00, 0x1e);
+    await this.dap.transfer(DP_SELECT_WRITE, 0);
+    await this.dap.transfer(DP_CTRL_STAT_WRITE, 0x50000000);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await this.dap.transfer(DP_CTRL_STAT_READ);
+      if (((status & 0xa0000000) >>> 0) === 0xa0000000) return debugPortId;
+    }
+    throw new Error("目标芯片 SWD 电源域未就绪");
+  }
+
+  private async readDebugPortIdAtAvailableClock(firstClockAlreadyConfigured = false): Promise<number> {
+    let lastError: unknown;
     for (const [index, clock] of SWD_CONNECT_CLOCKS.entries()) {
-      if (index > 0) await this.dap.configureSwd(clock);
+      if (!firstClockAlreadyConfigured || index > 0) await this.dap.configureSwd(clock);
       try {
         // ARM requires DPIDR to be the first transfer after an SWD line reset.
-        const debugPortId = await this.dap.transfer(DP_IDCODE_READ);
-        await this.dap.transfer(0x00, 0x1e);
-        await this.dap.transfer(DP_SELECT_WRITE, 0);
-        await this.dap.transfer(DP_CTRL_STAT_WRITE, 0x50000000);
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const status = await this.dap.transfer(DP_CTRL_STAT_READ);
-          if (((status & 0xa0000000) >>> 0) === 0xa0000000) return debugPortId;
-        }
-        throw new Error("目标芯片 SWD 电源域未就绪");
+        return await this.dap.transfer(DP_IDCODE_READ);
       } catch (error) {
-        if (!(error instanceof SwdTransferError) || error.status !== 0x07 || index === SWD_CONNECT_CLOCKS.length - 1) {
-          if (error instanceof SwdTransferError && error.status === 0x07) {
-            throw new Error("目标芯片没有回应 SWD：SWDIO 应答始终为高电平。请确认小车已供电且 3.3V 正常、探针与小车 GND 共地、TMS 接 SDIO/SWDIO、TCK 接 SCLK/SWCLK；5V、TDI、TDO 和 BOOT0 不参与连接。接线无误时，按一下小车 RESET 后重试");
-          }
-          throw error;
-        }
+        lastError = error;
+        if (!(error instanceof SwdTransferError) || error.status !== 0x07) throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  async initialise(resetConnection?: SwdResetConnection): Promise<number> {
+    await this.dap.initialise();
+    try {
+      return await this.powerUpDebugPort(await this.readDebugPortIdAtAvailableClock(true));
+    } catch (error) {
+      if (!(error instanceof SwdTransferError) || error.status !== 0x07 || !resetConnection) {
+        if (error instanceof SwdTransferError && error.status === 0x07) throw new Error("目标芯片没有回应 SWD：SWDIO 应答始终为高电平。请确认小车已供电且 3.3V 正常、探针与小车 GND 共地、TMS 接 SDIO/SWDIO、TCK 接 SCLK/SWCLK；5V、TDI、TDO 和 BOOT0 不参与连接");
+        throw error;
       }
     }
 
-    throw new Error("无法初始化 SWD 连接");
+    await resetConnection.holdReset();
+    let debugPortId: number;
+    try {
+      debugPortId = await this.readDebugPortIdAtAvailableClock();
+    } catch (error) {
+      await resetConnection.releaseReset(false);
+      if (error instanceof SwdTransferError && error.status === 0x07) {
+        throw new Error("保持 RESET 时目标芯片仍未回应 SWD。请检查 GND 共地、TMS 到 SWDIO、TCK 到 SWCLK，以及小车 SWD 接口是否确实连接到 STM32");
+      }
+      throw error;
+    }
+    await resetConnection.releaseReset(true);
+    return this.powerUpDebugPort(debugPortId);
   }
 
   private async setAccess(size: 0 | 1 | 2) {
@@ -472,13 +501,14 @@ async function requestProbe(): Promise<CmsisDapPacketTransport> {
 export async function flashDotInitialFirmware(
   firmware: ParsedInitialFirmware,
   onProgress: (progress: SwdFlashProgress) => void,
+  resetConnection?: SwdResetConnection,
 ): Promise<SwdFlashResult> {
   onProgress({ stage: "connecting", percent: 1, detail: "正在连接 CMSIS-DAP 探针" });
   const transport = await requestProbe();
   const dap = new CmsisDap(transport);
   const swd = new Stm32Swd(dap);
   try {
-    const debugPortId = await swd.initialise();
+    const debugPortId = await swd.initialise(resetConnection);
     onProgress({ stage: "checking", percent: 3, detail: "正在读取芯片型号和 Flash 容量" });
     const deviceId = await swd.read32(STM32_DBGMCU_IDCODE);
     const flashKilobytes = await swd.read16(STM32_FLASH_SIZE_REGISTER);

@@ -3108,6 +3108,9 @@ td small {
 .flash-result.success { background: rgba(43, 166, 121, 0.14); color: #66d8ad; }
 .flash-result.warning { background: rgba(218, 156, 49, 0.14); color: #e9bc69; }
 .flash-result.error { background: rgba(205, 73, 73, 0.14); color: #f0a0a0; }
+.reset-connect-prompt { background: rgba(218, 156, 49, 0.12); border: 1px solid rgba(233, 188, 105, 0.32); border-radius: 12px; color: var(--text-primary); display: grid; gap: 8px; margin-top: 12px; padding: 14px; }
+.reset-connect-prompt p { color: var(--text-muted); font-size: 13px; line-height: 1.55; margin: 0; }
+.reset-connect-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
 .firmware-flash-widget > .primary-button { margin-top: 14px; }
 
 @media (max-width: 980px) {

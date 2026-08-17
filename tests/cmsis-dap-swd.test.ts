@@ -74,7 +74,7 @@ class WrongTargetUsbProbe {
   private packet = new Uint8Array();
   private tar = 0;
 
-  constructor(private transferStatus = 1) {}
+  constructor(private transferStatus: number | (() => number) = 1) {}
 
   async open() { this.opened = true; }
   async close() { this.opened = false; }
@@ -101,8 +101,9 @@ class WrongTargetUsbProbe {
       const request = this.packet[3];
       const write = (request & 2) === 0;
       const value = new DataView(this.packet.buffer, this.packet.byteOffset).getUint32(4, true);
-      response[1] = this.transferStatus === 1 ? 1 : 0; response[2] = this.transferStatus;
-      if (this.transferStatus !== 1) return { data: new DataView(response.buffer), status: "ok" };
+      const transferStatus = typeof this.transferStatus === "function" ? this.transferStatus() : this.transferStatus;
+      response[1] = transferStatus === 1 ? 1 : 0; response[2] = transferStatus;
+      if (transferStatus !== 1) return { data: new DataView(response.buffer), status: "ok" };
       if (write && request === 0x05) this.tar = value;
       if (write && request === 0x0d) this.targetWrites.push(this.tar);
       let read = 0;
@@ -177,5 +178,27 @@ test("retries an unresponsive SWD target at lower clocks and reports wiring guid
     /目标芯片没有回应 SWD.*GND 共地.*TMS 接 SDIO\/SWDIO.*TCK 接 SCLK\/SWCLK/,
   );
   assert.deepEqual(probe.swdClocks, [1_000_000, 250_000, 50_000]);
+  assert.deepEqual(probe.targetWrites, []);
+});
+
+test("keeps one probe session open while the user connects under reset", async () => {
+  let transfers = 0;
+  const probe = new WrongTargetUsbProbe(() => ++transfers <= 3 ? 0x07 : 1);
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { usb: { async getDevices() { return [probe]; }, async requestDevice() { throw new Error("authorized probe should be reused"); } } },
+  });
+  const actions: string[] = [];
+  const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
+  await assert.rejects(
+    () => flashDotInitialFirmware(firmware, () => undefined, {
+      async holdReset() { actions.push("hold"); },
+      async releaseReset(targetDetected) { actions.push(targetDetected ? "release-detected" : "release-failed"); },
+    }),
+    /不是目标 STM32F103CB/,
+  );
+  assert.deepEqual(actions, ["hold", "release-detected"]);
+  assert.equal(probe.claimedInterfaces.length, 1);
+  assert.deepEqual(probe.swdClocks, [1_000_000, 250_000, 50_000, 1_000_000]);
   assert.deepEqual(probe.targetWrites, []);
 });

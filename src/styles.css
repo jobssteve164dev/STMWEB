@@ -816,7 +816,7 @@ h1, h2, h3 { text-wrap: balance; }
 .firmware-actions {
   display: grid;
   gap: 14px;
-  margin-top: 20px;
+  margin: 20px 0 18px;
 }
 
 .firmware-actions-heading {
@@ -841,12 +841,14 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .firmware-actions-grid {
+  align-items: stretch;
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr);
 }
 
 .firmware-actions-grid > * {
+  height: 100%;
   margin: 0;
   min-width: 0;
 }

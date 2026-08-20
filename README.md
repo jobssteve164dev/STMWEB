@@ -6,6 +6,8 @@
 
 STMWEB 用户 API、用户授权连接以及 GitOps、CloudMCP 和外部工具的统一客户端边界见 [STMWEB 用户 API 与客户端适配器架构](docs/user-api-and-client-adapters.md)。
 
+按工作区隔离的通用设备注册、南向供给、北向授权调用与可靠执行结果边界见 [STMWEB 通用设备远程控制网关设计](docs/device-remote-control-gateway.md)。
+
 现有 CloudMCP 工具迁移到用户授权 API 的兼容基线见 [CloudMCP 硬件调试工具契约](docs/cloudmcp-tools.md)。
 
 ## 第一版能力

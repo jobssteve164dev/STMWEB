@@ -80,13 +80,15 @@ interface UsbNavigatorLike extends Navigator {
   };
 }
 
-interface CmsisDapPacketTransport {
+export interface CmsisDapPacketTransport {
   readonly probeName: string;
   readonly maxPacketSize: number;
   setMaxPacketSize(size: number): void;
   exchange(command: number, payload?: Uint8Array<ArrayBufferLike>, timeout?: number): Promise<Uint8Array>;
   close(): Promise<void>;
 }
+
+export type CmsisDapProbeKind = "hid" | "slogic-combo8";
 
 class SwdTransferError extends Error {
   constructor(readonly status: number) {
@@ -471,6 +473,22 @@ async function openHidProbe(device: HidDeviceLike): Promise<CmsisDapPacketTransp
   return new CmsisDapHidTransport(device);
 }
 
+export async function requestCmsisDapProbe(kind: CmsisDapProbeKind): Promise<CmsisDapPacketTransport> {
+  if (kind === "slogic-combo8") {
+    const usb = (navigator as UsbNavigatorLike).usb;
+    if (!usb) throw new Error("当前浏览器不支持 SLogic Combo8 的 USB 连接");
+    const device = await usb.requestDevice({ filters: [{ vendorId: SLOGIC_COMBO8_VENDOR_ID, productId: SLOGIC_COMBO8_PRODUCT_ID }] });
+    return openUsbProbe(device);
+  }
+
+  const hid = (navigator as HidNavigatorLike).hid;
+  if (!hid) throw new Error("当前浏览器不支持 DAPLink / CMSIS-DAP 的 HID 连接");
+  const devices = await hid.requestDevice({ filters: [] });
+  const device = devices[0];
+  if (!device) throw new Error("没有选择 DAPLink / CMSIS-DAP 调试探针");
+  return openHidProbe(device);
+}
+
 async function requestProbe(): Promise<CmsisDapPacketTransport> {
   const usb = (navigator as UsbNavigatorLike).usb;
   const hid = (navigator as HidNavigatorLike).hid;
@@ -502,9 +520,10 @@ export async function flashDotInitialFirmware(
   firmware: ParsedInitialFirmware,
   onProgress: (progress: SwdFlashProgress) => void,
   resetConnection?: SwdResetConnection,
+  selectedTransport?: CmsisDapPacketTransport,
 ): Promise<SwdFlashResult> {
   onProgress({ stage: "connecting", percent: 1, detail: "正在连接 CMSIS-DAP 探针" });
-  const transport = await requestProbe();
+  const transport = selectedTransport ?? await requestProbe();
   const dap = new CmsisDap(transport);
   const swd = new Stm32Swd(dap);
   try {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { alignHalfwordTransferValues, flashDotInitialFirmware, parseDotInitialHex } from "../src/cmsis-dap-swd.js";
+import { alignHalfwordTransferValues, flashDotInitialFirmware, parseDotInitialHex, requestCmsisDapProbe } from "../src/cmsis-dap-swd.js";
 
 Object.assign(globalThis, { window: globalThis });
 
@@ -159,6 +159,53 @@ test("falls back to WebHID when no SLogic USB probe is selected", async () => {
   await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
   assert.equal(hidRequested, true);
   assert.deepEqual(probe.targetWrites, []);
+});
+
+test("opens the WebHID chooser directly for a user-selected DAPLink", async () => {
+  const probe = new WrongTargetProbe();
+  let hidRequested = false;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      usb: {
+        async getDevices() { throw new Error("must not inspect or prompt USB before WebHID"); },
+        async requestDevice() { throw new Error("must not prompt USB before WebHID"); },
+      },
+      hid: {
+        async requestDevice(options: unknown) {
+          hidRequested = true;
+          assert.deepEqual(options, { filters: [] });
+          return [probe];
+        },
+      },
+    },
+  });
+  const transport = await requestCmsisDapProbe("hid");
+  assert.equal(hidRequested, true);
+  assert.equal(probe.opened, true);
+  await transport.close();
+  assert.equal(probe.opened, false);
+});
+
+test("opens only the filtered WebUSB chooser for an explicitly selected SLogic Combo8", async () => {
+  const probe = new WrongTargetUsbProbe();
+  let requestedOptions: unknown;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      usb: {
+        async requestDevice(options: unknown) { requestedOptions = options; return probe; },
+      },
+      hid: {
+        async requestDevice() { throw new Error("must not prompt WebHID for Combo8"); },
+      },
+    },
+  });
+  const transport = await requestCmsisDapProbe("slogic-combo8");
+  assert.deepEqual(requestedOptions, { filters: [{ vendorId: 0xd6e7, productId: 0x3507 }] });
+  assert.equal(probe.claimedInterfaces.length, 1);
+  await transport.close();
+  assert.equal(probe.opened, false);
 });
 
 test("retries an unresponsive SWD target at lower clocks and reports wiring guidance", async () => {

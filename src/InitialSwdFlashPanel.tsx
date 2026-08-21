@@ -1,6 +1,6 @@
 import { Check, CircleAlert, Cpu, Loader2, ShieldCheck } from "lucide-react";
 import { useRef, useState } from "react";
-import { flashDotInitialFirmware, parseDotInitialHex, type SwdFlashProgress, type SwdFlashResult } from "./cmsis-dap-swd.js";
+import { flashDotInitialFirmware, parseDotInitialHex, requestCmsisDapProbe, type CmsisDapPacketTransport, type CmsisDapProbeKind, type SwdFlashProgress, type SwdFlashResult } from "./cmsis-dap-swd.js";
 import { useLocale } from "./i18n.js";
 
 const initialFirmwareUrl = "/firmware/dot-v1/dot_v1_initial_swd.hex";
@@ -32,10 +32,18 @@ export function InitialSwdFlashPanel() {
     setResetStep(null);
   }
 
-  async function flash() {
-    if (!window.confirm(c("即将擦除目标芯片并写入 DOT 初始固件。请确认 CMSIS-DAP 探针已通过 SWDIO、SWCLK、GND 与小车连接，并保持稳定供电。", "The target chip will be erased and the DOT bootstrap firmware installed. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the vehicle powered."))) return;
+  async function flash(probeKind: CmsisDapProbeKind) {
     setBusy(true); setError(""); setResult(null);
+    let selectedTransport: CmsisDapPacketTransport | undefined;
     try {
+      setProgress({ stage: "connecting", percent: 1, detail: c("请选择与小车连接的调试探针", "Choose the debug probe connected to the vehicle") });
+      selectedTransport = await requestCmsisDapProbe(probeKind);
+      if (!window.confirm(c("即将擦除目标芯片并写入 DOT 初始固件。请确认 CMSIS-DAP 探针已通过 SWDIO、SWCLK、GND 与小车连接，并保持稳定供电。", "The target chip will be erased and the DOT bootstrap firmware installed. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the vehicle powered."))) {
+        await selectedTransport.close();
+        selectedTransport = undefined;
+        setProgress(null);
+        return;
+      }
       const response = await fetch(initialFirmwareUrl, { cache: "no-store" });
       if (!response.ok) throw new Error(c("无法读取内置 DOT 初始固件", "The built-in DOT bootstrap firmware could not be loaded"));
       const firmware = parseDotInitialHex(await response.text());
@@ -56,10 +64,17 @@ export function InitialSwdFlashPanel() {
           await waitForResetAction(targetDetected ? "release" : "release-after-failure");
           if (targetDetected) setProgress({ stage: "connecting", percent: 2, detail: c("目标已响应，正在完成 SWD 连接", "Target detected, completing the SWD connection") });
         },
-      }));
+      }, selectedTransport));
+      selectedTransport = undefined;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : c("初始固件写入失败", "Bootstrap flashing failed"));
+      const cancelled = caught instanceof DOMException && caught.name === "NotFoundError";
+      setError(cancelled
+        ? probeKind === "hid"
+          ? c("未选择 DAPLink / CMSIS-DAP。请在系统设备窗口中选择新探针；如果使用 SLogic Combo8，请点击下方专用入口。", "No DAPLink / CMSIS-DAP was selected. Choose the new probe in the system picker, or use the SLogic Combo8 option below.")
+          : c("未选择 SLogic Combo8。请确认探针已连接电脑后重试。", "No SLogic Combo8 was selected. Connect the probe to this computer and try again.")
+        : caught instanceof Error ? caught.message : c("初始固件写入失败", "Bootstrap flashing failed"));
     } finally {
+      if (selectedTransport) await selectedTransport.close().catch(() => undefined);
       setBusy(false);
     }
   }
@@ -88,7 +103,10 @@ export function InitialSwdFlashPanel() {
         {result ? <div className="flash-result success"><Check size={17} /><span>{c(`初始固件已写入 · ${result.probeName} · 128 KiB`, `Bootstrap installed · ${result.probeName} · 128 KiB`)}</span></div> : null}
         {error ? <div className="flash-result error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : null}
       </div>
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void flash()}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在写入", "Flashing") : c("连接 SWD 并安装", "Connect SWD & Install")}</button>
+      <div className="initial-flash-actions">
+        <button className="primary-button" type="button" disabled={busy} onClick={() => void flash("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并安装", "Connect DAPLink & Install")}</button>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => void flash("slogic-combo8")}>{c("使用 SLogic Combo8", "Use SLogic Combo8")}</button>
+      </div>
     </article>
   );
 }

@@ -859,9 +859,15 @@ h1, h2, h3 { text-wrap: balance; }
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.firmware-actions-grid .initial-flash-card > .primary-button {
+.firmware-actions-grid .initial-flash-card > .initial-flash-actions {
   grid-column: 1 / -1;
   width: 100%;
+}
+
+.initial-flash-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .firmware-actions-grid .firmware-flash-widget {
@@ -3132,6 +3138,8 @@ td small {
 @media (max-width: 640px) {
   .firmware-actions-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
   .firmware-actions-heading > p { text-align: left; }
+  .initial-flash-actions { grid-template-columns: 1fr; }
+  .initial-flash-actions > button { justify-content: center; width: 100%; }
   .workbench-heading { align-items: stretch; flex-direction: column; gap: 12px; }
   .component-picker { grid-template-columns: 1fr; }
   .component-choice { min-height: 72px; }

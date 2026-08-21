@@ -21,7 +21,6 @@ const AP_DRW_WRITE = 0x0d;
 const AP_DRW_READ = 0x0f;
 
 const STM32_FLASH_BASE = 0x08000000;
-const STM32_FLASH_SIZE = 128 * 1024;
 const STM32_FLASH_PAGE_SIZE = 1024;
 const STM32_FLASH_SIZE_REGISTER = 0x1ffff7e0;
 const STM32_DBGMCU_IDCODE = 0xe0042000;
@@ -117,7 +116,15 @@ export interface SwdResetConnection {
 export interface ParsedInitialFirmware {
   image: Uint8Array;
   programmedBytes: number;
+  flashSize: number;
+  applicationBase: number;
+  applicationLimit: number;
 }
+
+const initialFirmwareLayouts = {
+  64: { flashSize: 64 * 1024, applicationBase: 0x08001000, applicationLimit: 0x0800fc00 },
+  128: { flashSize: 128 * 1024, applicationBase: 0x08004000, applicationLimit: 0x0801fc00 },
+} as const;
 
 export function alignHalfwordTransferValues(address: number, values: number[]): number[] {
   return values.map((value, index) => ((address + index * 2) & 2) !== 0 ? (value << 16) >>> 0 : value & 0xffff);
@@ -144,8 +151,9 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return result;
 }
 
-export function parseDotInitialHex(source: string): ParsedInitialFirmware {
-  const image = new Uint8Array(STM32_FLASH_SIZE).fill(0xff);
+export function parseDotInitialHex(source: string, flashKilobytes: 64 | 128 = 128): ParsedInitialFirmware {
+  const layout = initialFirmwareLayouts[flashKilobytes];
+  const image = new Uint8Array(layout.flashSize).fill(0xff);
   let upperAddress = 0;
   let programmedBytes = 0;
   let eof = false;
@@ -160,8 +168,8 @@ export function parseDotInitialHex(source: string): ParsedInitialFirmware {
     const type = record[3];
     if (type === 0) {
       const absolute = upperAddress + address;
-      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + STM32_FLASH_SIZE) {
-        throw new Error("初始固件包含 STM32F103CB Flash 之外的数据");
+      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + layout.flashSize) {
+        throw new Error(`初始固件包含 ${flashKilobytes} KiB Flash 之外的数据`);
       }
       const targetOffset = absolute - STM32_FLASH_BASE;
       image.set(record.subarray(4, 4 + record[0]), targetOffset);
@@ -172,18 +180,20 @@ export function parseDotInitialHex(source: string): ParsedInitialFirmware {
   if (!eof) throw new Error("初始固件缺少结束记录");
   const bootStack = readU32(image, 0);
   const bootReset = readU32(image, 4);
-  const appStack = readU32(image, 0x4000);
-  const appReset = readU32(image, 0x4004);
-  if (bootStack < 0x20000000 || bootStack > 0x20005000 || bootReset < 0x08000001 || bootReset >= 0x08004000 || (bootReset & 1) === 0) {
+  const appOffset = layout.applicationBase - STM32_FLASH_BASE;
+  const metadataOffset = layout.applicationLimit - STM32_FLASH_BASE;
+  const appStack = readU32(image, appOffset);
+  const appReset = readU32(image, appOffset + 4);
+  if (bootStack < 0x20000000 || bootStack > 0x20005000 || bootReset < 0x08000001 || bootReset >= layout.applicationBase || (bootReset & 1) === 0) {
     throw new Error("初始固件 Bootloader 向量表无效");
   }
-  if (appStack < 0x20000000 || appStack > 0x20005000 || appReset < 0x08004001 || appReset >= 0x0801fc00 || (appReset & 1) === 0) {
+  if (appStack < 0x20000000 || appStack > 0x20005000 || appReset < layout.applicationBase + 1 || appReset >= layout.applicationLimit || (appReset & 1) === 0) {
     throw new Error("初始固件应用向量表无效");
   }
-  if (readU32(image, 0x1fc00) !== 0x31574653 || readU32(image, 0x1fc0c) !== 0xcea8b9ac) {
+  if (readU32(image, metadataOffset) !== 0x31574653 || readU32(image, metadataOffset + 12) !== 0xcea8b9ac) {
     throw new Error("初始固件缺少有效的工厂元数据");
   }
-  return { image, programmedBytes };
+  return { image, programmedBytes, ...layout };
 }
 
 class CmsisDapHidTransport implements CmsisDapPacketTransport {
@@ -517,7 +527,7 @@ async function requestProbe(): Promise<CmsisDapPacketTransport> {
 }
 
 export async function flashDotInitialFirmware(
-  firmware: ParsedInitialFirmware,
+  firmware: ParsedInitialFirmware | ParsedInitialFirmware[],
   onProgress: (progress: SwdFlashProgress) => void,
   resetConnection?: SwdResetConnection,
   selectedTransport?: CmsisDapPacketTransport,
@@ -532,9 +542,12 @@ export async function flashDotInitialFirmware(
     const deviceId = await swd.read32(STM32_DBGMCU_IDCODE);
     const flashKilobytes = await swd.read16(STM32_FLASH_SIZE_REGISTER);
     if (debugPortId === 0 || debugPortId === 0xffffffff) throw new Error("SWD 已连接，但没有读到有效调试端口");
-    if ((deviceId & 0xfff) !== STM32F103_MEDIUM_DEVICE_ID || flashKilobytes !== 128) {
-      throw new Error(`检测到 Device ID 0x${(deviceId & 0xfff).toString(16).toUpperCase()}、${flashKilobytes} KiB Flash；不是目标 STM32F103CB，未执行擦除`);
+    if ((deviceId & 0xfff) !== STM32F103_MEDIUM_DEVICE_ID) {
+      throw new Error(`检测到 Device ID 0x${(deviceId & 0xfff).toString(16).toUpperCase()}、${flashKilobytes} KiB Flash；不是支持的 DOT STM32F103，未执行擦除`);
     }
+    const candidates = Array.isArray(firmware) ? firmware : [firmware];
+    const selectedFirmware = candidates.find((candidate) => candidate.flashSize === flashKilobytes * 1024);
+    if (!selectedFirmware) throw new Error(`检测到 Device ID 0x410、${flashKilobytes} KiB Flash；没有匹配该容量的 DOT 初始固件，未执行擦除`);
 
     await swd.write32(CORTEX_DHCSR, 0xa05f0003);
     await swd.write32(STM32_RCC_CR, (await swd.read32(STM32_RCC_CR)) | 1);
@@ -549,8 +562,9 @@ export async function flashDotInitialFirmware(
     }
     if ((await swd.read32(STM32_FLASH_CR) & 0x80) !== 0) throw new Error("STM32 Flash 仍处于写保护状态");
 
-    for (let page = 0; page < STM32_FLASH_SIZE / STM32_FLASH_PAGE_SIZE; page += 1) {
-      onProgress({ stage: "erasing", percent: 5 + Math.round(page / 128 * 20), detail: `正在擦除 Flash · ${page + 1}/128` });
+    const pageCount = selectedFirmware.flashSize / STM32_FLASH_PAGE_SIZE;
+    for (let page = 0; page < pageCount; page += 1) {
+      onProgress({ stage: "erasing", percent: 5 + Math.round(page / pageCount * 20), detail: `正在擦除 Flash · ${page + 1}/${pageCount}` });
       await swd.write32(STM32_FLASH_CR, 0x02);
       await swd.write32(STM32_FLASH_AR, STM32_FLASH_BASE + page * STM32_FLASH_PAGE_SIZE);
       await swd.write32(STM32_FLASH_CR, 0x42);
@@ -558,14 +572,14 @@ export async function flashDotInitialFirmware(
     }
 
     await swd.write32(STM32_FLASH_CR, 0x01);
-    const halfwordCount = firmware.image.byteLength / 2;
+    const halfwordCount = selectedFirmware.image.byteLength / 2;
     for (let offset = 0; offset < halfwordCount;) {
-      const value = firmware.image[offset * 2] | firmware.image[offset * 2 + 1] << 8;
+      const value = selectedFirmware.image[offset * 2] | selectedFirmware.image[offset * 2 + 1] << 8;
       if (value === 0xffff) { offset += 1; continue; }
       const start = offset;
       const values: number[] = [];
       while (offset < halfwordCount && values.length < 256) {
-        const next = firmware.image[offset * 2] | firmware.image[offset * 2 + 1] << 8;
+        const next = selectedFirmware.image[offset * 2] | selectedFirmware.image[offset * 2 + 1] << 8;
         if (next === 0xffff) break;
         values.push(next);
         offset += 1;
@@ -576,13 +590,13 @@ export async function flashDotInitialFirmware(
     }
     await swd.write32(STM32_FLASH_CR, 0x80);
 
-    const wordCount = firmware.image.byteLength / 4;
+    const wordCount = selectedFirmware.image.byteLength / 4;
     const verifyBatch = 256;
     for (let offset = 0; offset < wordCount; offset += verifyBatch) {
       const count = Math.min(verifyBatch, wordCount - offset);
       const actual = await swd.readWords(STM32_FLASH_BASE + offset * 4, count);
       for (let index = 0; index < count; index += 1) {
-        if (actual[index] !== readU32(firmware.image, (offset + index) * 4)) {
+        if (actual[index] !== readU32(selectedFirmware.image, (offset + index) * 4)) {
           throw new Error(`初始固件回读校验失败，地址 0x${(STM32_FLASH_BASE + (offset + index) * 4).toString(16).toUpperCase()}`);
         }
       }
@@ -594,7 +608,7 @@ export async function flashDotInitialFirmware(
     await swd.write32(CORTEX_AIRCR, 0x05fa0004).catch(() => undefined);
     await dap.resetTarget();
     onProgress({ stage: "restarting", percent: 100, detail: "初始固件已写入" });
-    return { probeName: dap.probeName, deviceId, flashSize: flashKilobytes * 1024, programmedBytes: firmware.programmedBytes };
+    return { probeName: dap.probeName, deviceId, flashSize: flashKilobytes * 1024, programmedBytes: selectedFirmware.programmedBytes };
   } finally {
     await dap.disconnect();
     await dap.close();

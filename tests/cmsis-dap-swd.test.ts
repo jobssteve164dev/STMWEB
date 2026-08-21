@@ -56,7 +56,7 @@ test("checks SWD chip identity before any target flash write", async () => {
     value: { hid: { async requestDevice() { return [probe]; } } },
   });
   const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
-  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
+  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是支持的 DOT STM32F103/);
   assert.deepEqual(probe.targetWrites, []);
 });
 
@@ -130,7 +130,7 @@ test("uses CMSIS-DAP v2 bulk endpoints for SLogic Combo8 and keeps the chip guar
     },
   });
   const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
-  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
+  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是支持的 DOT STM32F103/);
   assert.deepEqual(requestedOptions, { filters: [{ vendorId: 0xd6e7, productId: 0x3507 }] });
   assert.deepEqual(probe.claimedInterfaces, [0]);
   assert.deepEqual(probe.releasedInterfaces, [0]);
@@ -156,7 +156,7 @@ test("falls back to WebHID when no SLogic USB probe is selected", async () => {
     },
   });
   const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_initial_swd.hex", "utf8"));
-  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是目标 STM32F103CB/);
+  await assert.rejects(() => flashDotInitialFirmware(firmware, () => undefined), /不是支持的 DOT STM32F103/);
   assert.equal(hidRequested, true);
   assert.deepEqual(probe.targetWrites, []);
 });
@@ -242,10 +242,18 @@ test("keeps one probe session open while the user connects under reset", async (
       async holdReset() { actions.push("hold"); },
       async releaseReset(targetDetected) { actions.push(targetDetected ? "release-detected" : "release-failed"); },
     }),
-    /不是目标 STM32F103CB/,
+    /不是支持的 DOT STM32F103/,
   );
   assert.deepEqual(actions, ["hold", "release-detected"]);
   assert.equal(probe.claimedInterfaces.length, 1);
   assert.deepEqual(probe.swdClocks, [1_000_000, 250_000, 50_000, 1_000_000]);
   assert.deepEqual(probe.targetWrites, []);
+});
+
+test("validates the 64 KiB compact initial firmware layout", () => {
+  const firmware = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex", "utf8"), 64);
+  assert.equal(firmware.flashSize, 64 * 1024);
+  assert.equal(firmware.applicationBase, 0x08001000);
+  assert.equal(firmware.applicationLimit, 0x0800fc00);
+  assert.ok(firmware.programmedBytes < 64 * 1024);
 });

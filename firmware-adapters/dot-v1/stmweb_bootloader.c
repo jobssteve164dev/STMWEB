@@ -6,10 +6,18 @@
 #define STMWEB_BOOT_REQUEST 0xB007u
 #define STMWEB_FACTORY_MAGIC 0x31574653u
 #define STMWEB_APPLICATION_MAGIC 0x31505753u
+#ifndef STMWEB_APP_BASE
 #define STMWEB_APP_BASE 0x08004000u
+#endif
+#ifndef STMWEB_APP_LIMIT
 #define STMWEB_APP_LIMIT 0x0801FC00u
-#define STMWEB_METADATA_ADDRESS 0x0801FC00u
-#define STMWEB_FLASH_END 0x08020000u
+#endif
+#ifndef STMWEB_METADATA_ADDRESS
+#define STMWEB_METADATA_ADDRESS STMWEB_APP_LIMIT
+#endif
+#ifndef STMWEB_EXPECTED_FLASH_KB
+#define STMWEB_EXPECTED_FLASH_KB 128u
+#endif
 #define STMWEB_FLASH_PAGE_SIZE 1024u
 #define STMWEB_FLASH_SIZE_REGISTER 0x1FFFF7E0u
 #define STMWEB_STM32F103_MEDIUM_DEVICE_ID 0x410u
@@ -181,7 +189,7 @@ __attribute__((noreturn)) static void runApplication(void) {
 
 static uint32_t beginUpdate(const uint8_t *payload, uint16_t length) {
   if (length != 8u) return STMWEB_BOOT_STATUS_BAD_FRAME;
-  if (*(volatile uint16_t *)STMWEB_FLASH_SIZE_REGISTER != 128u) return STMWEB_BOOT_STATUS_BAD_TARGET;
+  if (*(volatile uint16_t *)STMWEB_FLASH_SIZE_REGISTER != STMWEB_EXPECTED_FLASH_KB) return STMWEB_BOOT_STATUS_BAD_TARGET;
   expectedSize = readU32(payload);
   expectedCrc = readU32(payload + 4u);
   if (expectedSize == 0u || expectedSize > STMWEB_APP_LIMIT - STMWEB_APP_BASE) return STMWEB_BOOT_STATUS_BAD_TARGET;

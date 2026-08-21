@@ -4,9 +4,13 @@ const FRAME_MAGIC = 0x574d5453;
 const PROTOCOL_VERSION = 1;
 const HEADER_LENGTH = 14;
 const MAX_PAYLOAD = 256;
-const APP_BASE = 0x08004000;
-const APP_LIMIT = 0x0801fc00;
 const STM32F103_MEDIUM_DEVICE_ID = 0x410;
+
+const applicationLayouts = [
+  { flashSize: 128 * 1024, applicationBase: 0x08004000, applicationLimit: 0x0801fc00 },
+  { flashSize: 64 * 1024, applicationBase: 0x08001000, applicationLimit: 0x0800fc00 },
+] as const;
+type DotApplicationLayout = (typeof applicationLayouts)[number];
 
 const command = {
   hello: 0x01,
@@ -69,15 +73,19 @@ function writeU32(view: DataView, offset: number, value: number) {
   view.setUint32(offset, value >>> 0, true);
 }
 
-export function validateDotApplication(bytes: Uint8Array): void {
+function detectDotApplicationLayout(bytes: Uint8Array): DotApplicationLayout {
   if (bytes.byteLength < 8) throw new Error("应用固件内容不完整");
-  if (bytes.byteLength > APP_LIMIT - APP_BASE) throw new Error("应用固件超过 DOT V1 应用分区容量");
   const stack = readU32(bytes, 0);
   const reset = readU32(bytes, 4);
-  if (stack < 0x20000000 || stack > 0x20005000) throw new Error("应用固件的栈地址不属于 STM32F103CB SRAM");
-  if (reset < APP_BASE || reset >= APP_LIMIT || (reset & 1) === 0) {
-    throw new Error("请选择从 0x08004000 启动的 DOT 蓝牙升级 BIN，不能使用初始 SWD HEX 或原始地址固件");
-  }
+  if (stack < 0x20000000 || stack > 0x20005000) throw new Error("应用固件的栈地址不属于 STM32F103 SRAM");
+  const layout = applicationLayouts.find((candidate) => reset >= candidate.applicationBase && reset < candidate.applicationLimit && (reset & 1) === 1);
+  if (!layout) throw new Error("请选择由 STMWEB 生成的 DOT 蓝牙升级 BIN，不能使用初始 SWD HEX 或原始地址固件");
+  if (bytes.byteLength > layout.applicationLimit - layout.applicationBase) throw new Error("应用固件超过 DOT V1 应用分区容量");
+  return layout;
+}
+
+export function validateDotApplication(bytes: Uint8Array): void {
+  detectDotApplicationLayout(bytes);
 }
 
 export function encodeBootFrame(frameCommand: number, sequence: number, offset = 0, payload: Uint8Array<ArrayBufferLike> = new Uint8Array()): Uint8Array {
@@ -214,11 +222,11 @@ function parseHello(payload: Uint8Array): DotBootloaderInfo {
   };
 }
 
-function validateTarget(info: DotBootloaderInfo) {
-  if ((info.deviceId & 0xfff) !== STM32F103_MEDIUM_DEVICE_ID || info.flashSize !== 128 * 1024) {
-    throw new Error("连接的设备不是受支持的 STM32F103CB（128 KiB），烧录已停止");
+function validateTarget(info: DotBootloaderInfo, layout: DotApplicationLayout) {
+  if ((info.deviceId & 0xfff) !== STM32F103_MEDIUM_DEVICE_ID || info.flashSize !== layout.flashSize) {
+    throw new Error(`固件适用于 ${layout.flashSize / 1024} KiB DOT，但当前设备容量不同，烧录已停止`);
   }
-  if (info.applicationBase !== APP_BASE || info.applicationCapacity !== APP_LIMIT - APP_BASE) {
+  if (info.applicationBase !== layout.applicationBase || info.applicationCapacity !== layout.applicationLimit - layout.applicationBase) {
     throw new Error("设备 Bootloader 的应用分区与当前固件不匹配");
   }
 }
@@ -243,7 +251,7 @@ export async function flashDotApplication(
   onProgress: (progress: DotFlashProgress) => void,
 ): Promise<DotFlashResult> {
   if (connection.kind !== "bluetooth" || !connection.write || !connection.setDataHandler) throw new Error("请先通过蓝牙连接 DOT 小车");
-  validateDotApplication(firmware);
+  const layout = detectDotApplicationLayout(firmware);
   const client = new DotBootClient(connection);
   connection.setDataHandler(client.receive);
   const checksum = crc32(firmware);
@@ -254,7 +262,7 @@ export async function flashDotApplication(
     await delay(900);
     onProgress({ stage: "checking", percent: 3 });
     const info = parseHello((await client.request(command.hello, 0, new Uint8Array(), 5000)).payload);
-    validateTarget(info);
+    validateTarget(info, layout);
     onProgress({ stage: "erasing", percent: 5 });
     await client.request(command.begin, 0, beginPayload(firmware.byteLength, checksum), 15_000);
     began = true;
@@ -278,4 +286,7 @@ export async function flashDotApplication(
   }
 }
 
-export const dotFirmwareLayout = { applicationBase: APP_BASE, applicationLimit: APP_LIMIT } as const;
+export const dotFirmwareLayout = {
+  standard: applicationLayouts[0],
+  compact: applicationLayouts[1],
+} as const;

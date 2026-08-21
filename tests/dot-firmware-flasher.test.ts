@@ -13,11 +13,11 @@ function u32(value: number): Uint8Array {
   return bytes;
 }
 
-function helloPayload(): Uint8Array {
+function helloPayload(flashSize = 128 * 1024, applicationBase = 0x08004000, applicationCapacity = 0x1bc00): Uint8Array {
   const result = new Uint8Array(20);
-  result.set(u32(128 * 1024), 0);
-  result.set(u32(0x08004000), 4);
-  result.set(u32(0x1bc00), 8);
+  result.set(u32(flashSize), 0);
+  result.set(u32(applicationBase), 4);
+  result.set(u32(applicationCapacity), 8);
   result.set(u32(1), 12);
   result.set(u32(0x20000410), 16);
   return result;
@@ -37,10 +37,22 @@ test("validates the generated DOT initial SWD Intel HEX", () => {
   assert.ok(parsed.programmedBytes > 90_000);
 });
 
+test("validates the generated 64 KiB compact SWD Intel HEX", () => {
+  const parsed = parseDotInitialHex(readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex", "utf8"), 64);
+  assert.equal(parsed.image.byteLength, 64 * 1024);
+  assert.ok(parsed.programmedBytes < 60_000);
+});
+
 test("rejects an application linked at the original flash base", () => {
   const bytes = application();
   bytes.set(u32(0x08000101), 4);
-  assert.throws(() => validateDotApplication(bytes), /0x08004000/);
+  assert.throws(() => validateDotApplication(bytes), /STMWEB 生成/);
+});
+
+test("accepts a compact application linked at 0x08001000", () => {
+  const bytes = application();
+  bytes.set(u32(0x08001101), 4);
+  assert.doesNotThrow(() => validateDotApplication(bytes));
 });
 
 test("decodes a fragmented bootloader response after unrelated bytes", () => {
@@ -92,4 +104,36 @@ test("flashes a relocated DOT application through the Bluetooth boot protocol", 
   assert.deepEqual(received, [...firmware]);
   assert.equal(result.restartConfirmed, true);
   assert.equal(progress.at(-1), 100);
+});
+
+test("flashes a 64 KiB compact application through its matching Bluetooth partition", async () => {
+  const firmware = application();
+  firmware.set(u32(0x08001101), 4);
+  const requestDecoder = new DotBootResponseDecoder();
+  let rawHandler: ((bytes: Uint8Array) => void) | null = null;
+  let reportedCompactLayout = false;
+  const connection: HardwareConnection = {
+    kind: "bluetooth",
+    name: "ECB02",
+    detail: "test",
+    setDataHandler(handler) { rawHandler = handler; },
+    async write(data) {
+      if (typeof data === "string") return;
+      for (const request of requestDecoder.push(data)) {
+        let payload = new Uint8Array();
+        if (request.command === 1) {
+          payload = helloPayload(64 * 1024, 0x08001000, 0xec00);
+          reportedCompactLayout = true;
+        }
+        rawHandler?.(encodeBootFrame(request.command | 0x80, request.sequence, 0, payload));
+        if (request.command === 4) setTimeout(() => rawHandler?.(new TextEncoder().encode("bat3.90")), 20);
+      }
+    },
+    async close() {},
+  };
+  const result = await flashDotApplication(connection, firmware, () => undefined);
+  assert.equal(reportedCompactLayout, true);
+  assert.equal(result.info.flashSize, 64 * 1024);
+  assert.equal(result.info.applicationBase, 0x08001000);
+  assert.equal(result.restartConfirmed, true);
 });

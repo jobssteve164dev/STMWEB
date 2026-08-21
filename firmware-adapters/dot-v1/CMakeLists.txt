@@ -14,12 +14,23 @@ project(dot_v1_gcc C ASM)
 
 set(STMWEB_TARGET "${STMWEB_TARGET}" CACHE STRING "STM32 target")
 if(STMWEB_TARGET STREQUAL "stm32f103c8")
-  set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103x8.ld")
-  set(STMWEB_INITIAL_SWD_FIRMWARE OFF)
+  set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103c8_app.ld")
+  set(STMWEB_BOOTLOADER_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103c8_bootloader.ld")
+  set(STMWEB_APPLICATION_BASE 0x08001000u)
+  set(STMWEB_APPLICATION_LIMIT 0x0800FC00u)
+  set(STMWEB_EXPECTED_FLASH_KB 64u)
+  set(STMWEB_DEVICE_DEFINE STM32F10X_MD)
+  set(STMWEB_COMPACT_RUNTIME ON)
 else()
   set(STMWEB_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103cb_app.ld")
-  set(STMWEB_INITIAL_SWD_FIRMWARE ON)
+  set(STMWEB_BOOTLOADER_LINKER_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/stm32f103cb_bootloader.ld")
+  set(STMWEB_APPLICATION_BASE 0x08004000u)
+  set(STMWEB_APPLICATION_LIMIT 0x0801FC00u)
+  set(STMWEB_EXPECTED_FLASH_KB 128u)
+  set(STMWEB_DEVICE_DEFINE STM32F10X_HD)
+  set(STMWEB_COMPACT_RUNTIME OFF)
 endif()
+set(STMWEB_INITIAL_SWD_FIRMWARE ON)
 
 if(NOT DEFINED STMWEB_SOURCE_ROOT)
   set(STMWEB_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/source")
@@ -70,6 +81,27 @@ if(STMWEB_INITIAL_SWD_FIRMWARE)
   )
 endif()
 
+if(STMWEB_COMPACT_RUNTIME)
+  target_sources(dot_v1.elf PRIVATE "${CMAKE_CURRENT_LIST_DIR}/stmweb_compact_runtime.c")
+  set_source_files_properties(
+    "${STMWEB_SOURCE_ROOT}/DOT/CONTROL/control.c"
+    PROPERTIES COMPILE_DEFINITIONS "sprintf=stmweb_compact_sprintf"
+  )
+  set_property(
+    SOURCE "${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/USART3/usart3.c"
+    APPEND PROPERTY COMPILE_DEFINITIONS "strtod=stmweb_compact_strtod"
+  )
+  foreach(relative IN ITEMS
+    DOT_HARDWARE/MPU6050/MPU6050.c
+    DOT/DMP/inv_mpu.c DOT/DMP/inv_mpu_dmp_motion_driver.c
+  )
+    set_source_files_properties(
+      "${STMWEB_SOURCE_ROOT}/${relative}"
+      PROPERTIES COMPILE_DEFINITIONS "printf=stmweb_compact_printf"
+    )
+  endforeach()
+endif()
+
 target_include_directories(dot_v1.elf PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}"
   "${STMWEB_SOURCE_ROOT}/USER" "${STMWEB_SOURCE_ROOT}/DOT_COER"
@@ -91,8 +123,8 @@ target_include_directories(dot_v1.elf PRIVATE
 )
 
 target_compile_definitions(dot_v1.elf PRIVATE
-  STM32F10X_HD USE_STDPERIPH_DRIVER
-  $<$<BOOL:${STMWEB_INITIAL_SWD_FIRMWARE}>:STMWEB_APPLICATION_BASE=0x08004000u>
+  ${STMWEB_DEVICE_DEFINE} USE_STDPERIPH_DRIVER
+  $<$<BOOL:${STMWEB_INITIAL_SWD_FIRMWARE}>:STMWEB_APPLICATION_BASE=${STMWEB_APPLICATION_BASE}>
 )
 target_compile_options(dot_v1.elf PRIVATE
   -mcpu=cortex-m3 -mthumb -Os -ffunction-sections -fdata-sections -fno-common
@@ -125,14 +157,20 @@ if(STMWEB_INITIAL_SWD_FIRMWARE)
     "${STMWEB_SOURCE_ROOT}/USER"
     "${STMWEB_SOURCE_ROOT}/DOT_COER"
   )
-  target_compile_definitions(dot_v1_bootloader.elf PRIVATE STM32F10X_MD)
+  target_compile_definitions(dot_v1_bootloader.elf PRIVATE
+    STM32F10X_MD
+    STMWEB_APP_BASE=${STMWEB_APPLICATION_BASE}
+    STMWEB_APP_LIMIT=${STMWEB_APPLICATION_LIMIT}
+    STMWEB_METADATA_ADDRESS=${STMWEB_APPLICATION_LIMIT}
+    STMWEB_EXPECTED_FLASH_KB=${STMWEB_EXPECTED_FLASH_KB}
+  )
   target_compile_options(dot_v1_bootloader.elf PRIVATE
     -mcpu=cortex-m3 -mthumb -Os -ffreestanding -ffunction-sections -fdata-sections
     -Wall -Wextra -Werror
   )
   target_link_options(dot_v1_bootloader.elf PRIVATE
     -mcpu=cortex-m3 -mthumb
-    "-T${CMAKE_CURRENT_LIST_DIR}/stm32f103cb_bootloader.ld"
+    "-T${STMWEB_BOOTLOADER_LINKER_SCRIPT}"
     -nostartfiles
     -Wl,--gc-sections -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/dot_v1_bootloader.map
   )

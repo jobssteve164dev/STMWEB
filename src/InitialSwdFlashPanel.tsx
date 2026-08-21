@@ -3,7 +3,10 @@ import { useRef, useState } from "react";
 import { flashDotInitialFirmware, parseDotInitialHex, requestCmsisDapProbe, type CmsisDapPacketTransport, type CmsisDapProbeKind, type SwdFlashProgress, type SwdFlashResult } from "./cmsis-dap-swd.js";
 import { useLocale } from "./i18n.js";
 
-const initialFirmwareUrl = "/firmware/dot-v1/dot_v1_initial_swd.hex";
+const initialFirmwareUrls = [
+  [128, "/firmware/dot-v1/dot_v1_initial_swd.hex"],
+  [64, "/firmware/dot-v1/dot_v1_compact_initial_swd.hex"],
+] as const;
 
 export function InitialSwdFlashPanel() {
   const { isEnglish } = useLocale();
@@ -44,10 +47,12 @@ export function InitialSwdFlashPanel() {
         setProgress(null);
         return;
       }
-      const response = await fetch(initialFirmwareUrl, { cache: "no-store" });
-      if (!response.ok) throw new Error(c("无法读取内置 DOT 初始固件", "The built-in DOT bootstrap firmware could not be loaded"));
-      const firmware = parseDotInitialHex(await response.text());
-      setResult(await flashDotInitialFirmware(firmware, setProgress, {
+      const firmwares = await Promise.all(initialFirmwareUrls.map(async ([flashKilobytes, url]) => {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(c("无法读取内置 DOT 初始固件", "The built-in DOT bootstrap firmware could not be loaded"));
+        return parseDotInitialHex(await response.text(), flashKilobytes);
+      }));
+      setResult(await flashDotInitialFirmware(firmwares, setProgress, {
         holdReset: async () => {
           setProgress({ stage: "connecting", percent: 2, detail: c("等待按住小车 RESET", "Waiting for RESET to be held") });
           await waitForResetAction("hold");
@@ -85,7 +90,7 @@ export function InitialSwdFlashPanel() {
       <div className="initial-flash-copy">
         <span className="panel-kicker">{c("第一次连接", "First connection")}</span>
         <h2>{c("通过 SWD 安装无线升级入口", "Install wireless updates over SWD")}</h2>
-        <p>{c("仅用于 DOT V1 / STM32F103CB。系统会先识别芯片型号和 128 KiB 容量，匹配后才会擦除并写入。", "For DOT V1 / STM32F103CB only. The chip identity and 128 KiB capacity are checked before any erase or write begins.")}</p>
+        <p>{c("用于 DOT V1。系统会先识别芯片与 Flash 容量，自动选择 64 KiB 紧凑版或 128 KiB 标准版，匹配后才会擦除并写入。", "For DOT V1. The chip and Flash capacity are checked first, then the matching 64 KiB compact or 128 KiB standard firmware is selected before any erase or write.")}</p>
         <div className="flash-safety"><ShieldCheck size={16} /><span>{c("写入完成后即可断开探针，后续更新使用蓝牙。", "After installation, disconnect the probe and use Bluetooth for future updates.")}</span></div>
         {resetStep ? <div className="reset-connect-prompt" role="alertdialog" aria-live="assertive">
           <strong>{resetStep === "hold" ? c("现在按住小车 RESET，不要松开", "Press and keep holding the vehicle RESET button") : c("现在松开小车 RESET", "Release the vehicle RESET button now")}</strong>
@@ -100,7 +105,7 @@ export function InitialSwdFlashPanel() {
           </div>
         </div> : null}
         {progress ? <div className="flash-progress" aria-live="polite"><div><span>{progress.detail}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
-        {result ? <div className="flash-result success"><Check size={17} /><span>{c(`初始固件已写入 · ${result.probeName} · 128 KiB`, `Bootstrap installed · ${result.probeName} · 128 KiB`)}</span></div> : null}
+        {result ? <div className="flash-result success"><Check size={17} /><span>{c(`初始固件已写入 · ${result.probeName} · ${result.flashSize / 1024} KiB`, `Bootstrap installed · ${result.probeName} · ${result.flashSize / 1024} KiB`)}</span></div> : null}
         {error ? <div className="flash-result error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : null}
       </div>
       <div className="initial-flash-actions">

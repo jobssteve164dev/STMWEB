@@ -49,4 +49,4 @@ npm audit --audit-level=high
 
 ## 当前边界
 
-DOT V1 已提供浏览器 WebHID（CMSIS-DAP v1）与 WebUSB Bulk（CMSIS-DAP v2）首次 SWD 安装和后续蓝牙应用升级；其他 STM32 目标、ST-Link/J-Link/OpenOCD、断点与寄存器读写仍未实现。固件目前直接存入 PostgreSQL，适合内部首版；公共平台阶段应在保持现有版本模型的前提下迁移到对象存储。后续扩展本地连接器时，前台仍保留同一个工作台动作入口，让浏览器直连与连接器差异停留在实现层。
+DOT V1 已提供浏览器 WebHID（CMSIS-DAP v1）与 WebUSB Bulk（CMSIS-DAP v2）首次 SWD 安装和后续蓝牙应用升级。首次安装会先读取实际 Flash 容量，自动选择 64 KiB 紧凑版或 128 KiB 标准版；两版均保留 DOT 核心控制、实时调试和蓝牙升级能力。其他 STM32 目标、ST-Link/J-Link/OpenOCD、断点与寄存器读写仍未实现。固件目前直接存入 PostgreSQL，适合内部首版；公共平台阶段应在保持现有版本模型的前提下迁移到对象存储。后续扩展本地连接器时，前台仍保留同一个工作台动作入口，让浏览器直连与连接器差异停留在实现层。

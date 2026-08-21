@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const buildDirectory = path.resolve(process.argv[2] || "output/firmware/dot-v1");
+const target = process.argv[3] || "stm32f103cb";
+const layout = target === "stm32f103c8"
+  ? { flashEnd: 0x08010000, appBase: 0x08001000, appLimit: 0x0800fc00 }
+  : { flashEnd: 0x08020000, appBase: 0x08004000, appLimit: 0x0801fc00 };
 
 function parseHex(fileName) {
   const bytes = new Map();
@@ -51,20 +55,22 @@ assertSubset(application, combined, "application");
 
 const bootStack = u32(combined, 0x08000000);
 const bootReset = u32(combined, 0x08000004);
-const appStack = u32(combined, 0x08004000);
-const appReset = u32(combined, 0x08004004);
+const appStack = u32(combined, layout.appBase);
+const appReset = u32(combined, layout.appBase + 4);
 assert.ok(bootStack >= 0x20000000 && bootStack <= 0x20005000, "bootloader stack is outside SRAM");
-assert.ok(bootReset >= 0x08000001 && bootReset < 0x08004000 && (bootReset & 1) === 1, "bootloader reset vector is outside its partition");
+assert.ok(bootReset >= 0x08000001 && bootReset < layout.appBase && (bootReset & 1) === 1, "bootloader reset vector is outside its partition");
 assert.ok(appStack >= 0x20000000 && appStack <= 0x20005000, "application stack is outside SRAM");
-assert.ok(appReset >= 0x08004001 && appReset < 0x0801fc00 && (appReset & 1) === 1, "application reset vector is outside its partition");
-assert.equal(u32(combined, 0x0801fc00), 0x31574653, "factory metadata is missing");
-assert.equal(u32(combined, 0x0801fc0c), (~0x31574653) >>> 0, "factory metadata check word is invalid");
-assert.ok(Math.max(...application.keys()) < 0x0801fc00, "application overlaps metadata");
+assert.ok(appReset >= layout.appBase + 1 && appReset < layout.appLimit && (appReset & 1) === 1, "application reset vector is outside its partition");
+assert.equal(u32(combined, layout.appLimit), 0x31574653, "factory metadata is missing");
+assert.equal(u32(combined, layout.appLimit + 12), (~0x31574653) >>> 0, "factory metadata check word is invalid");
+assert.ok(Math.max(...application.keys()) < layout.appLimit, "application overlaps metadata");
+assert.ok(Math.max(...combined.keys()) < layout.flashEnd, "combined firmware exceeds target flash");
 
 process.stdout.write(JSON.stringify({
   bootloaderBytes: bootloader.size - 16,
   applicationBytes: application.size,
-  applicationCapacity: 0x0801fc00 - 0x08004000,
+  target,
+  applicationCapacity: layout.appLimit - layout.appBase,
   bootReset: `0x${bootReset.toString(16)}`,
   appReset: `0x${appReset.toString(16)}`,
 }) + "\n");

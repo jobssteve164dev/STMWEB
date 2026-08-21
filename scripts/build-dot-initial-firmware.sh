@@ -25,6 +25,7 @@ cmake -E copy_if_different "$output_root/dot_v1_initial_swd.hex" "$public_firmwa
 cmake -E copy_if_different "$compact_output_root/dot_v1_initial_swd.hex" "$public_firmware_root/dot_v1_compact_initial_swd.hex"
 cmake -E copy_if_different "$output_root/dot_v1.bin" "$public_firmware_root/dot_v1_application.bin"
 cmake -E copy_if_different "$compact_output_root/dot_v1.bin" "$public_firmware_root/dot_v1_compact_application.bin"
+chmod 0644 "$public_firmware_root/dot_v1_application.bin" "$public_firmware_root/dot_v1_compact_application.bin"
 
 printf 'DOT 128 KiB 初始 SWD 固件：%s\n' "$output_root/dot_v1_initial_swd.hex"
 printf 'DOT 64 KiB 紧凑初始 SWD 固件：%s\n' "$compact_output_root/dot_v1_initial_swd.hex"

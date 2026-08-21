@@ -43,6 +43,14 @@ test("validates the generated 64 KiB compact SWD Intel HEX", () => {
   assert.ok(parsed.programmedBytes < 60_000);
 });
 
+test("validates both published Bluetooth application binaries", () => {
+  const standard = new Uint8Array(readFileSync("public/firmware/dot-v1/dot_v1_application.bin"));
+  const compact = new Uint8Array(readFileSync("public/firmware/dot-v1/dot_v1_compact_application.bin"));
+  assert.doesNotThrow(() => validateDotApplication(standard));
+  assert.doesNotThrow(() => validateDotApplication(compact));
+  assert.ok(compact.byteLength < 60_416);
+});
+
 test("rejects an application linked at the original flash base", () => {
   const bytes = application();
   bytes.set(u32(0x08000101), 4);
@@ -107,11 +115,13 @@ test("flashes a relocated DOT application through the Bluetooth boot protocol", 
 });
 
 test("flashes a 64 KiB compact application through its matching Bluetooth partition", async () => {
-  const firmware = application();
-  firmware.set(u32(0x08001101), 4);
+  const standardFirmware = application();
+  const compactFirmware = application();
+  compactFirmware.set(u32(0x08001101), 4);
   const requestDecoder = new DotBootResponseDecoder();
   let rawHandler: ((bytes: Uint8Array) => void) | null = null;
   let reportedCompactLayout = false;
+  const received: number[] = [];
   const connection: HardwareConnection = {
     kind: "bluetooth",
     name: "ECB02",
@@ -125,15 +135,17 @@ test("flashes a 64 KiB compact application through its matching Bluetooth partit
           payload = helloPayload(64 * 1024, 0x08001000, 0xec00);
           reportedCompactLayout = true;
         }
+        if (request.command === 3) received.push(...request.payload);
         rawHandler?.(encodeBootFrame(request.command | 0x80, request.sequence, 0, payload));
         if (request.command === 4) setTimeout(() => rawHandler?.(new TextEncoder().encode("bat3.90")), 20);
       }
     },
     async close() {},
   };
-  const result = await flashDotApplication(connection, firmware, () => undefined);
+  const result = await flashDotApplication(connection, [standardFirmware, compactFirmware], () => undefined);
   assert.equal(reportedCompactLayout, true);
   assert.equal(result.info.flashSize, 64 * 1024);
   assert.equal(result.info.applicationBase, 0x08001000);
+  assert.deepEqual(received, [...compactFirmware]);
   assert.equal(result.restartConfirmed, true);
 });

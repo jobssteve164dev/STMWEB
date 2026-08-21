@@ -49,6 +49,8 @@ export interface DotFlashResult {
   restartConfirmed: boolean;
 }
 
+export type DotApplicationFirmware = Uint8Array | readonly Uint8Array[];
+
 interface BootResponse {
   command: number;
   sequence: number;
@@ -247,14 +249,16 @@ async function waitForRestartData(connection: HardwareConnection): Promise<boole
 
 export async function flashDotApplication(
   connection: HardwareConnection,
-  firmware: Uint8Array,
+  firmwareSource: DotApplicationFirmware,
   onProgress: (progress: DotFlashProgress) => void,
 ): Promise<DotFlashResult> {
   if (connection.kind !== "bluetooth" || !connection.write || !connection.setDataHandler) throw new Error("请先通过蓝牙连接 DOT 小车");
-  const layout = detectDotApplicationLayout(firmware);
+  const candidates = (Array.isArray(firmwareSource) ? firmwareSource : [firmwareSource]).map((bytes) => ({
+    bytes,
+    layout: detectDotApplicationLayout(bytes),
+  }));
   const client = new DotBootClient(connection);
   connection.setDataHandler(client.receive);
-  const checksum = crc32(firmware);
   let began = false;
   try {
     onProgress({ stage: "entering", percent: 1 });
@@ -262,7 +266,16 @@ export async function flashDotApplication(
     await delay(900);
     onProgress({ stage: "checking", percent: 3 });
     const info = parseHello((await client.request(command.hello, 0, new Uint8Array(), 5000)).payload);
-    validateTarget(info, layout);
+    const selected = candidates.find(({ layout }) => layout.flashSize === info.flashSize
+      && layout.applicationBase === info.applicationBase
+      && layout.applicationLimit - layout.applicationBase === info.applicationCapacity);
+    if (!selected) {
+      if (candidates.length === 1) validateTarget(info, candidates[0].layout);
+      throw new Error(`没有与当前 ${info.flashSize / 1024} KiB DOT 匹配的内置应用固件`);
+    }
+    validateTarget(info, selected.layout);
+    const firmware = selected.bytes;
+    const checksum = crc32(firmware);
     onProgress({ stage: "erasing", percent: 5 });
     await client.request(command.begin, 0, beginPayload(firmware.byteLength, checksum), 15_000);
     began = true;

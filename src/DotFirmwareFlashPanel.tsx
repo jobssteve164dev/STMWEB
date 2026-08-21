@@ -1,7 +1,7 @@
 import { Check, CircleAlert, FileCode2, Loader2, Radio, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { loadFirmwareContent, type DebugEventRecord, type FirmwareVersionRecord } from "./db.js";
-import { flashDotApplication, validateDotApplication, type DotFlashProgress } from "./dot-firmware-flasher.js";
+import { flashDotApplication, validateDotApplication, type DotApplicationFirmware, type DotFlashProgress } from "./dot-firmware-flasher.js";
 import type { HardwareConnection } from "./hardware.js";
 import { useLocale } from "./i18n.js";
 
@@ -12,7 +12,13 @@ interface DotFirmwareFlashPanelProps {
   onEvent: (level: DebugEventRecord["level"], message: string, payload?: DebugEventRecord["payload"]) => void;
 }
 
-interface SelectedFirmware { name: string; bytes: Uint8Array }
+interface SelectedFirmware { name: string; bytes: DotApplicationFirmware }
+
+const builtInFirmwareId = "built-in-dot-stable";
+const builtInFirmwareUrls = [
+  "/firmware/dot-v1/dot_v1_application.bin",
+  "/firmware/dot-v1/dot_v1_compact_application.bin",
+] as const;
 
 const stageLabels: Record<DotFlashProgress["stage"], [string, string]> = {
   entering: ["正在进入升级模式", "Entering update mode"],
@@ -27,7 +33,7 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
   const { isEnglish } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
   const savedBins = useMemo(() => firmwareVersions.filter((item) => item.fileName.toLowerCase().endsWith(".bin") || item.fileType.toLowerCase() === "bin"), [firmwareVersions]);
-  const [savedId, setSavedId] = useState(savedBins[0]?.id || "");
+  const [savedId, setSavedId] = useState(builtInFirmwareId);
   const [localFirmware, setLocalFirmware] = useState<SelectedFirmware | null>(null);
   const [progress, setProgress] = useState<DotFlashProgress | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +43,7 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
   const voltageReady = voltage >= 3.3;
 
   useEffect(() => {
-    if (!localFirmware && !savedBins.some((item) => item.id === savedId)) setSavedId(savedBins[0]?.id || "");
+    if (!localFirmware && savedId !== builtInFirmwareId && !savedBins.some((item) => item.id === savedId)) setSavedId(builtInFirmwareId);
   }, [localFirmware, savedBins, savedId]);
 
   async function selectLocal(event: ChangeEvent<HTMLInputElement>) {
@@ -55,6 +61,16 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
 
   async function selectedFirmware(): Promise<SelectedFirmware> {
     if (localFirmware) return localFirmware;
+    if (savedId === builtInFirmwareId) {
+      const bytes = await Promise.all(builtInFirmwareUrls.map(async (url) => {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(c("无法读取内置 DOT 应用固件", "The built-in DOT application firmware could not be loaded"));
+        const firmware = new Uint8Array(await response.arrayBuffer());
+        validateDotApplication(firmware);
+        return firmware;
+      }));
+      return { name: c("内置 DOT 稳定版（自动匹配）", "Built-in DOT stable firmware (automatic match)"), bytes };
+    }
     const saved = savedBins.find((item) => item.id === savedId);
     if (!saved) throw new Error(c("请先选择应用固件", "Choose an application firmware first"));
     const bytes = await loadFirmwareContent(saved.id);
@@ -69,7 +85,8 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
     setBusy(true); setMessage(null); setProgress(null);
     try {
       const firmware = await selectedFirmware();
-      onEvent("info", c(`开始蓝牙烧录 · ${firmware.name}`, `Bluetooth flashing started · ${firmware.name}`), { fileName: firmware.name, fileSize: firmware.bytes.byteLength });
+      const fileSize = firmware.bytes instanceof Uint8Array ? firmware.bytes.byteLength : firmware.bytes.reduce((total, item) => total + item.byteLength, 0);
+      onEvent("info", c(`开始蓝牙烧录 · ${firmware.name}`, `Bluetooth flashing started · ${firmware.name}`), { fileName: firmware.name, fileSize });
       const result = await flashDotApplication(connection!, firmware.bytes, setProgress);
       if (result.restartConfirmed) {
         setMessage({ tone: "success", text: c("固件已校验写入，设备已重启并恢复数据", "Firmware verified, device restarted and data resumed") });
@@ -90,9 +107,9 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
   return (
     <article className="workbench-card firmware-flash-widget">
       <div className="widget-heading"><div><Radio size={18} /><strong>{c("蓝牙烧录", "Bluetooth Flashing")}</strong></div><span className={bluetoothReady ? "widget-state" : "widget-state offline"}><i />{bluetoothReady ? c("小车已连接", "Vehicle connected") : c("等待蓝牙", "Waiting for Bluetooth")}</span></div>
-      <p>{c("选择 DOT 应用 BIN。系统会自动核对设备配置、容量和分区后再写入。", "Choose a DOT application BIN. Device profile, capacity and partition are checked automatically before writing.")}</p>
+      <p>{c("直接使用内置稳定版，系统会根据小车实际容量自动选择匹配固件。", "Use the built-in stable release directly. The matching firmware is selected automatically from the vehicle's actual capacity.")}</p>
       <div className="firmware-flash-source">
-        <label><span>{c("已保存固件", "Saved firmware")}</span><select value={savedId} disabled={busy || savedBins.length === 0} onChange={(event) => { setSavedId(event.target.value); setLocalFirmware(null); }}>{savedBins.length ? savedBins.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>) : <option value="">{c("暂无可用 BIN", "No BIN available")}</option>}</select></label>
+        <label><span>{c("升级固件", "Update firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => { setSavedId(event.target.value); setLocalFirmware(null); }}><option value={builtInFirmwareId}>{c("内置 DOT 稳定版（自动匹配）", "Built-in DOT stable firmware (automatic match)")}</option>{savedBins.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label>
         <span>{c("或", "or")}</span>
         <input ref={inputRef} className="visually-hidden" type="file" accept=".bin,application/octet-stream" onChange={(event) => void selectLocal(event)} />
         <button className="secondary-button" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Upload size={15} />{localFirmware ? localFirmware.name : c("选择本机 BIN", "Choose local BIN")}</button>
@@ -100,7 +117,7 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
       <div className="flash-preflight"><span className={bluetoothReady ? "ready" : "blocked"}>{bluetoothReady ? <Check size={14} /> : <CircleAlert size={14} />}{c("蓝牙连接", "Bluetooth")}</span><span className={voltageReady ? "ready" : "blocked"}>{voltageReady ? <Check size={14} /> : <CircleAlert size={14} />}{voltage > 0 ? `${voltage.toFixed(2)} V` : c("等待电压", "Waiting for voltage")}</span></div>
       {progress ? <div className="flash-progress" aria-live="polite"><div><span>{c(...stageLabels[progress.stage])}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
       {message ? <div className={`flash-result ${message.tone}`} role={message.tone === "error" ? "alert" : "status"}>{message.tone === "success" ? <Check size={17} /> : <CircleAlert size={17} />}<span>{message.text}</span></div> : null}
-      <button className="primary-button" type="button" disabled={busy || !bluetoothReady || !voltageReady || (!localFirmware && !savedId)} onClick={() => void flash()}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在烧录", "Flashing") : c("开始蓝牙烧录", "Flash over Bluetooth")}</button>
+      <button className="primary-button" type="button" disabled={busy || !bluetoothReady || !voltageReady} onClick={() => void flash()}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在烧录", "Flashing") : c("开始蓝牙烧录", "Flash over Bluetooth")}</button>
     </article>
   );
 }

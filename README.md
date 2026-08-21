@@ -2,6 +2,8 @@
 
 面向 STM32 智能硬件的浏览器调试工作台实验原型。
 
+产品以标准化、高度自动化的固件生成运行时为主线：把用户的硬件描述和应用代码转换为可调试、可恢复、可通过长期 SWD 或硬件支持的无线方式烧录的标准固件包。完整设计见 [STMWEB 标准固件生成运行时设计](docs/standard-firmware-generation-runtime.md)。
+
 第一版近距离无线接入、固件能力识别、动态调试组件、在线构建与安全升级的正式边界见 [第一版近距离无线硬件调试设计](docs/v1-nearby-wireless-debugging.md)。
 
 STMWEB 用户 API、用户授权连接以及 GitOps、CloudMCP 和外部工具的统一客户端边界见 [STMWEB 用户 API 与客户端适配器架构](docs/user-api-and-client-adapters.md)。
@@ -49,4 +51,4 @@ npm audit --audit-level=high
 
 ## 当前边界
 
-DOT V1 已提供浏览器 WebHID（CMSIS-DAP v1）与 WebUSB Bulk（CMSIS-DAP v2）首次 SWD 安装和后续蓝牙应用升级。首次安装会先读取实际 Flash 容量，自动选择 64 KiB 紧凑版或 128 KiB 标准版；两版均保留 DOT 核心控制、实时调试和蓝牙升级能力。其他 STM32 目标、ST-Link/J-Link/OpenOCD、断点与寄存器读写仍未实现。固件目前直接存入 PostgreSQL，适合内部首版；公共平台阶段应在保持现有版本模型的前提下迁移到对象存储。后续扩展本地连接器时，前台仍保留同一个工作台动作入口，让浏览器直连与连接器差异停留在实现层。
+DOT V1 已通过浏览器 WebHID（CMSIS-DAP v1）与 WebUSB Bulk（CMSIS-DAP v2）完成 64 KiB 实物 SWD 写入，并通过蓝牙完成后续应用升级。当前页面仍将 SWD 实现限定为 DOT 初始安装；目标设计会把它提升为稳定、通用、长期可用的有线烧录路径，无线烧录只在硬件支持时作为并列选择。其他 STM32 目标、ST-Link/J-Link/OpenOCD、断点与寄存器读写仍未实现。固件目前直接存入 PostgreSQL，适合内部首版；公共平台阶段应在保持现有版本模型的前提下迁移到对象存储。后续扩展本地连接器时，前台仍保留同一个用户动作入口，让浏览器直连与连接器差异停留在实现层。

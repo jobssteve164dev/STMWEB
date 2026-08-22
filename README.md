@@ -4,6 +4,8 @@
 
 产品以标准化、高度自动化的固件生成运行时为主线：把用户的硬件描述和应用代码转换为可调试、可恢复、可通过长期 SWD 或硬件支持的无线方式烧录的标准固件包。完整设计见 [STMWEB 标准固件生成运行时设计](docs/standard-firmware-generation-runtime.md)。
 
+当前阶段 B 已打通 DOT V1 的首个纵向切片：用户在固件管理中创建硬件项目，Runner 生成完整固件与应用固件，服务端依据实际字节验真并自动登记，再由用户发布稳定版并直接进入 SWD 或蓝牙烧录。第二种真实硬件尚未接入，因此当前实现仍是可扩展框架的首个样板，不宣称跨硬件通用。
+
 第一版近距离无线接入、固件能力识别、动态调试组件、在线构建与安全升级的正式边界见 [第一版近距离无线硬件调试设计](docs/v1-nearby-wireless-debugging.md)。
 
 STMWEB 用户 API、用户授权连接以及 GitOps、CloudMCP 和外部工具的统一客户端边界见 [STMWEB 用户 API 与客户端适配器架构](docs/user-api-and-client-adapters.md)。

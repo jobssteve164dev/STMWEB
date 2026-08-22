@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { allFirmwareAdapterTargets, getFirmwareAdapterTarget, type FirmwareAdapterTarget } from "./firmware-adapter-registry.js";
 
 export type FirmwareArtifactRole = "complete-image" | "application" | "unclassified";
 export type FirmwareFlashMethod = "swd" | "bluetooth";
@@ -21,14 +22,9 @@ export interface PreparedFirmwareUpload extends FirmwareArtifactDescriptor {
 }
 
 const STM32_FLASH_BASE = 0x08000000;
-const DOT_HARDWARE_PROFILE = "stmweb.dot-v1";
-const DOT_RUNTIME_VERSION = "1";
 const DOT_FACTORY_MAGIC = 0x31574653;
 const DOT_FACTORY_CHECK = 0xcea8b9ac;
-const dotLayouts = [
-  { flashSize: 64 * 1024, applicationBase: 0x08001000, applicationLimit: 0x0800fc00 },
-  { flashSize: 128 * 1024, applicationBase: 0x08004000, applicationLimit: 0x0801fc00 },
-] as const;
+const registeredTargets = allFirmwareAdapterTargets();
 
 function readU32(bytes: Uint8Array, offset: number): number {
   if (offset < 0 || offset + 4 > bytes.byteLength) return 0;
@@ -42,19 +38,21 @@ function vectorsMatch(bytes: Uint8Array, vectorOffset: number, resetBase: number
     && reset >= resetBase + 1 && reset < resetLimit && (reset & 1) === 1;
 }
 
-function inspectDotApplication(content: Uint8Array): FirmwareArtifactDescriptor | null {
+function inspectDotApplication(content: Uint8Array, candidates = registeredTargets): FirmwareArtifactDescriptor | null {
   if (content.byteLength < 8) return null;
-  for (const layout of dotLayouts) {
-    if (content.byteLength > layout.applicationLimit - layout.applicationBase) continue;
-    if (!vectorsMatch(content, 0, layout.applicationBase, layout.applicationLimit)) continue;
+  for (const { adapter, target } of candidates) {
+    if (content.byteLength > target.applicationLimit - target.applicationBase) continue;
+    if (!vectorsMatch(content, 0, target.applicationBase, target.applicationLimit)) continue;
+    const contract = target.artifacts.find((artifact) => artifact.role === "application");
+    if (!contract) continue;
     return {
-      hardwareProfileId: DOT_HARDWARE_PROFILE,
+      hardwareProfileId: adapter.adapterId,
       artifactRole: "application",
-      flashMethods: ["swd", "bluetooth"],
-      flashSize: layout.flashSize,
-      applicationBase: layout.applicationBase,
-      applicationLimit: layout.applicationLimit,
-      runtimeVersion: DOT_RUNTIME_VERSION,
+      flashMethods: [...contract.flashMethods],
+      flashSize: target.flashSize,
+      applicationBase: target.applicationBase,
+      applicationLimit: target.applicationLimit,
+      runtimeVersion: adapter.runtimeVersion,
       status: "verified",
       fileType: "BIN",
     };
@@ -74,8 +72,8 @@ function decodeHexRecord(line: string, lineNumber: number): Uint8Array {
   return record;
 }
 
-function parseDotCompleteImage(source: string, layout: (typeof dotLayouts)[number]): boolean {
-  const image = new Uint8Array(layout.flashSize).fill(0xff);
+function parseDotCompleteImage(source: string, target: FirmwareAdapterTarget): boolean {
+  const image = new Uint8Array(target.flashSize).fill(0xff);
   let upperAddress = 0;
   let eof = false;
   for (const [lineIndex, rawLine] of source.split(/\r?\n/).entries()) {
@@ -86,7 +84,7 @@ function parseDotCompleteImage(source: string, layout: (typeof dotLayouts)[numbe
     const type = record[3];
     if (type === 0) {
       const absolute = upperAddress + address;
-      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + layout.flashSize) return false;
+      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + target.flashSize) return false;
       image.set(record.subarray(4, 4 + record[0]), absolute - STM32_FLASH_BASE);
     } else if (type === 1) {
       eof = true;
@@ -96,26 +94,28 @@ function parseDotCompleteImage(source: string, layout: (typeof dotLayouts)[numbe
     }
   }
   if (!eof) throw new Error("固件缺少 Intel HEX 结束记录");
-  const appOffset = layout.applicationBase - STM32_FLASH_BASE;
-  const metadataOffset = layout.applicationLimit - STM32_FLASH_BASE;
-  return vectorsMatch(image, 0, STM32_FLASH_BASE, layout.applicationBase)
-    && vectorsMatch(image, appOffset, layout.applicationBase, layout.applicationLimit)
+  const appOffset = target.applicationBase - STM32_FLASH_BASE;
+  const metadataOffset = target.applicationLimit - STM32_FLASH_BASE;
+  return vectorsMatch(image, 0, STM32_FLASH_BASE, target.applicationBase)
+    && vectorsMatch(image, appOffset, target.applicationBase, target.applicationLimit)
     && readU32(image, metadataOffset) === DOT_FACTORY_MAGIC
     && readU32(image, metadataOffset + 12) === DOT_FACTORY_CHECK;
 }
 
-function inspectDotCompleteImage(content: Uint8Array): FirmwareArtifactDescriptor | null {
+function inspectDotCompleteImage(content: Uint8Array, candidates = registeredTargets): FirmwareArtifactDescriptor | null {
   const source = new TextDecoder("utf-8", { fatal: true }).decode(content);
-  for (const layout of dotLayouts) {
-    if (!parseDotCompleteImage(source, layout)) continue;
+  for (const { adapter, target } of candidates) {
+    if (!parseDotCompleteImage(source, target)) continue;
+    const contract = target.artifacts.find((artifact) => artifact.role === "complete-image");
+    if (!contract) continue;
     return {
-      hardwareProfileId: DOT_HARDWARE_PROFILE,
+      hardwareProfileId: adapter.adapterId,
       artifactRole: "complete-image",
-      flashMethods: ["swd"],
-      flashSize: layout.flashSize,
-      applicationBase: layout.applicationBase,
-      applicationLimit: layout.applicationLimit,
-      runtimeVersion: DOT_RUNTIME_VERSION,
+      flashMethods: [...contract.flashMethods],
+      flashSize: target.flashSize,
+      applicationBase: target.applicationBase,
+      applicationLimit: target.applicationLimit,
+      runtimeVersion: adapter.runtimeVersion,
       status: "verified",
       fileType: "HEX",
     };
@@ -128,9 +128,15 @@ function fallbackFileType(fileName: string): string {
   return extension?.slice(0, 32) || "FILE";
 }
 
-export function inspectFirmwareArtifact(content: Uint8Array, fileName: string): FirmwareArtifactDescriptor {
+export function inspectFirmwareArtifact(
+  content: Uint8Array,
+  fileName: string,
+  expected?: { hardwareProfileId: string; adapterVersion: string; target: string },
+): FirmwareArtifactDescriptor {
+  const registered = expected ? getFirmwareAdapterTarget(expected.hardwareProfileId, expected.adapterVersion, expected.target) : null;
+  const candidates = expected ? registered ? [registered] : [] : registeredTargets;
   const looksLikeHex = content[0] === 0x3a || fileName.toLowerCase().endsWith(".hex");
-  const recognized = looksLikeHex ? inspectDotCompleteImage(content) : inspectDotApplication(content);
+  const recognized = looksLikeHex ? inspectDotCompleteImage(content, candidates) : inspectDotApplication(content, candidates);
   return recognized ?? {
     hardwareProfileId: null,
     artifactRole: "unclassified",

@@ -3017,6 +3017,30 @@ td small {
   justify-content: center;
   width: 44px;
 }
+.page-section > .build-runner-widget { margin-top: 20px; }
+
+.hardware-project-form {
+  align-items: end;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(170px, 1fr) minmax(210px, 1fr) auto;
+  margin-bottom: 12px;
+  padding: 14px;
+}
+.hardware-project-form > div { align-self: center; display: grid; gap: 4px; }
+.hardware-project-form > div span { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.hardware-project-form label { display: grid; gap: 7px; }
+.hardware-project-form label > span { color: var(--text-muted); font-size: 12px; }
+.hardware-project-form input,
+.hardware-project-form select { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; min-width: 0; padding: 0 10px; }
+.hardware-project-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.hardware-project-list > span { align-items: center; background: rgba(43, 166, 121, 0.12); border-radius: 999px; color: #46cd9b; display: flex; font-size: 12px; gap: 6px; padding: 7px 10px; }
+.hardware-project-list small { color: var(--text-muted); }
+.build-row .package-ready { color: #46cd9b; }
+.build-row .package-stable { align-items: center; color: #46cd9b; display: inline-flex; font-size: 12px; font-weight: 700; gap: 4px; white-space: nowrap; }
 
 .runner-summary {
   align-items: center;
@@ -3135,6 +3159,7 @@ td small {
   .compact-chart-widget { grid-column: span 12; }
   .compact-action-widget { grid-column: span 6; }
   .build-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hardware-project-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-form .primary-button { width: 100%; }
 }
 
@@ -3155,6 +3180,7 @@ td small {
   .pairing-command { grid-template-columns: 1fr; }
   .pairing-command button { justify-content: center; }
   .build-form { grid-template-columns: 1fr; }
+  .hardware-project-form { grid-template-columns: 1fr; }
   .build-row { align-items: start; grid-template-columns: 32px minmax(0, 1fr) 44px; }
   .build-row a,
   .build-row > button { grid-column: 2 / -1; justify-content: center; }

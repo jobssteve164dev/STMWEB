@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { pool, withTransaction } from "./database.js";
 import { digestRunnerSecret, requireRunner, type RunnerRequest } from "./runner-auth.js";
+import { registerGeneratedFirmwarePackage } from "./firmware-package-registration.js";
 
 const router = express.Router();
 const capabilitiesSchema = z.object({
@@ -80,10 +81,12 @@ router.post("/jobs/lease", asyncRoute(async (request, response) => {
   const lease = await withTransaction(async (client) => {
     const active = await client.query(`SELECT id FROM build_jobs WHERE runner_id=$1 AND status IN ('leased','running') LIMIT 1`, [runner.id]);
     if (active.rowCount) return null;
-    const queued = await client.query<{ id: string; name: string; profile: string; target: string; sourceName: string; sourceSha256: string }>(
-      `SELECT id, name, profile, target, source_name AS "sourceName", source_sha256 AS "sourceSha256"
-       FROM build_jobs WHERE runner_id=$1 AND status='queued' AND desired_state='running'
-       ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
+    const queued = await client.query<{ id: string; name: string; profile: string; target: string; sourceName: string; sourceSha256: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string }>(
+      `SELECT j.id,j.name,j.profile,j.target,j.source_name AS "sourceName",j.source_sha256 AS "sourceSha256",
+              p.hardware_profile_id AS "hardwareProfileId",j.adapter_version AS "adapterVersion",j.runtime_version AS "runtimeVersion"
+       FROM build_jobs j JOIN hardware_projects p ON p.id=j.hardware_project_id
+       WHERE j.runner_id=$1 AND j.status='queued' AND j.desired_state='running'
+       ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,
       [runner.id],
     );
     const job = queued.rows[0];
@@ -127,6 +130,7 @@ router.post("/jobs/:jobId/events", asyncRoute(async (request, response) => {
       if (event.type === "accepted") await client.query(`UPDATE build_jobs SET status='running', started_at=COALESCE(started_at,now()), updated_at=now() WHERE id=$1`, [request.params.jobId]);
       if (event.type === "progress") await client.query(`UPDATE build_jobs SET progress=$2, updated_at=now() WHERE id=$1`, [request.params.jobId, Math.max(0, Math.min(100, Number(event.payload.progress ?? 0)))]);
       if (["completed", "failed", "cancelled"].includes(event.type)) {
+        if (event.type === "completed") await registerGeneratedFirmwarePackage(client, String(request.params.jobId));
         const status = event.type === "completed" ? "succeeded" : event.type;
         await client.query(`UPDATE build_jobs SET status=$2, progress=CASE WHEN $2='succeeded' THEN 100 ELSE progress END, finished_at=now(), error=$3, updated_at=now() WHERE id=$1`, [request.params.jobId, status, event.type === "failed" ? event.message ?? "构建失败" : null]);
         await client.query(`UPDATE build_runners SET current_job_id=NULL, status='online', last_seen_at=now() WHERE id=$1`, [runner.id]);

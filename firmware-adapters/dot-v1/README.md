@@ -2,11 +2,12 @@
 
 该目录把原始 Keil/ARMCC 工程适配为 Runner 可执行的 GCC/CMake 构建，原始业务源码不需要改写。
 
-识别条件：源码包中存在 `USER/DOT.uvprojx`，设备为 `STM32F103CB`，并包含 DOT 控制模块。Runner 自动选择此适配器；其他 CMake 工程继续使用自己的根 `CMakeLists.txt`。
+识别条件：源码包中存在 `USER/DOT.uvprojx`，设备为 `STM32F103CB`，并包含 DOT 控制模块。Runner 会用当前版本的 DOT 适配器组合平台运行时；自带 CMake 的源码包必须产出同一标准固件清单，服务端仍会对最终制品重新验真。
 
 适配边界：
 
 - 用 GNU 汇编启动文件替代 ARMASM 启动文件。
+- `adapter.json` 是目标容量、链接脚本、运行时版本、制品角色和烧录方式的机器可读合同，CMake、Runner 与服务端共同使用该合同。
 - 用独立兼容层实现原 `sys.c` 中的 ARMCC 汇编和系统函数。
 - 为 Linux 大小写敏感文件系统提供三个头文件兼容入口。
 - `stm32f103cb` 使用 128 KiB Flash 布局：16 KiB Bootloader、从 `0x08004000` 启动的应用以及末页初始化标记。
@@ -14,6 +15,7 @@
 - 两个目标都生成 `dot_v1_initial_swd.hex`，供网页在 SWD 读回实际容量后自动选择。
 - 两个目标的 `dot_v1.bin` 同时作为内置蓝牙应用固件发布；网页先读取 Bootloader 分区信息，再自动选择完全匹配的 64/128 KiB 版本。
 - 构建脚本同时生成 `public/firmware/dot-v1/manifest.json`，以同一硬件适配 ID 描述两种容量、完整 SWD 镜像、应用镜像、烧录方式、大小和 SHA-256；网页只从该清单读取内置制品。
+- Runner 构建还会生成 `stmweb_firmware_manifest.json`；服务端只有在清单、任务身份、适配版本、布局、摘要和实际字节全部一致时，才把完整固件与应用固件登记到工作区。
 - 应用收到 `STMWEB:BOOT` 后先停止电机，再通过备份寄存器请求重启进入 Bootloader。Bootloader 使用原车 USART3（PB10/PB11、115200 8N1）接收带序号与 CRC32 的分块固件。
 - 应用区域止于 `0x0801FC00`，最后 1 KiB 保存应用有效标记、长度和 CRC32；升级开始先清除该页，因此断电或传输中断不会启动残缺应用。
 

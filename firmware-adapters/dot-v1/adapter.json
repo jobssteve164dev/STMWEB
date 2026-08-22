@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "stmweb.dot-v1",
+  "adapterVersion": "1",
+  "runtimeVersion": "1",
+  "label": "DOT V1",
+  "buildProfile": "stm32-cmake-gcc-v1",
+  "runtime": {
+    "debugProtocol": "1",
+    "bootProtocol": "1",
+    "transports": ["swd", "bluetooth-uart"]
+  },
+  "targets": [
+    {
+      "id": "stm32f103c8",
+      "label": "STM32F103C8 · 64 KiB",
+      "mcuFamily": "stm32f103",
+      "deviceIds": [1040],
+      "flashSize": 65536,
+      "applicationBase": 134221824,
+      "applicationLimit": 134282240,
+      "applicationLinkerScript": "stm32f103c8_app.ld",
+      "bootloaderLinkerScript": "stm32f103c8_bootloader.ld",
+      "deviceDefine": "STM32F10X_MD",
+      "compactRuntime": true,
+      "artifacts": [
+        {
+          "buildFile": "dot_v1_initial_swd.hex",
+          "role": "complete-image",
+          "format": "ihex",
+          "flashMethods": ["swd"]
+        },
+        {
+          "buildFile": "dot_v1.bin",
+          "role": "application",
+          "format": "bin",
+          "flashMethods": ["swd", "bluetooth"]
+        }
+      ]
+    },
+    {
+      "id": "stm32f103cb",
+      "label": "STM32F103CB · 128 KiB",
+      "mcuFamily": "stm32f103",
+      "deviceIds": [1040],
+      "flashSize": 131072,
+      "applicationBase": 134234112,
+      "applicationLimit": 134347776,
+      "applicationLinkerScript": "stm32f103cb_app.ld",
+      "bootloaderLinkerScript": "stm32f103cb_bootloader.ld",
+      "deviceDefine": "STM32F10X_HD",
+      "compactRuntime": false,
+      "artifacts": [
+        {
+          "buildFile": "dot_v1_initial_swd.hex",
+          "role": "complete-image",
+          "format": "ihex",
+          "flashMethods": ["swd"]
+        },
+        {
+          "buildFile": "dot_v1.bin",
+          "role": "application",
+          "format": "bin",
+          "flashMethods": ["swd", "bluetooth"]
+        }
+      ]
+    }
+  ]
+}

@@ -63,7 +63,7 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
     try {
       setProgress({ stage: "connecting", percent: 1, detail: c("请选择与小车连接的调试探针", "Choose the debug probe connected to the vehicle") });
       selectedTransport = await requestCmsisDapProbe(probeKind);
-      const selectedName = savedId === builtInFirmwareId ? c("内置 DOT 稳定版", "Built-in DOT stable firmware") : savedSwdImages.find((item) => item.id === savedId)?.fileName ?? c("所选固件", "the selected firmware");
+      const selectedName = savedId === builtInFirmwareId ? c("DOT 完整稳定版（含 Bootloader）", "DOT complete stable firmware (includes Bootloader)") : savedSwdImages.find((item) => item.id === savedId)?.fileName ?? c("所选固件", "the selected firmware");
       if (!window.confirm(c(`即将通过 SWD 写入 ${selectedName}。请确认 CMSIS-DAP 探针已连接 SWDIO、SWCLK、GND，并保持设备稳定供电。`, `The selected firmware will be written over SWD. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the device powered.`))) {
         await selectedTransport.close();
         selectedTransport = undefined;
@@ -110,7 +110,7 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
         <span className="panel-kicker">{c("长期有线烧录", "Wired flashing")}</span>
         <h2>{c("通过 SWD 安装、更新或恢复", "Install, update or recover over SWD")}</h2>
         <p>{c("用于 DOT V1 的日常有线烧录和设备恢复。系统会先识别芯片与 Flash 容量，只有固件完全匹配后才会擦除并写入。", "Use SWD for routine wired flashing and recovery on DOT V1. The chip and Flash capacity are checked before any matching firmware is erased or written.")}</p>
-        <label className="swd-firmware-source"><span>{c("烧录固件", "Firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => setSavedId(event.target.value)}><option value={builtInFirmwareId}>{c("内置 DOT 稳定版（自动匹配）", "Built-in DOT stable firmware (automatic match)")}</option>{savedSwdImages.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label>
+        <label className="swd-firmware-source"><span>{c("烧录固件", "Firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => setSavedId(event.target.value)}><option value={builtInFirmwareId}>{c("DOT 完整稳定版（含 Bootloader，自动匹配）", "DOT complete stable firmware (includes Bootloader, automatic match)")}</option>{savedSwdImages.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label>
         <div className="flash-safety"><ShieldCheck size={16} /><span>{c("SWD 始终可用；支持蓝牙的固件也可以在写入后改用无线更新。", "SWD remains available. Firmware with Bluetooth support can also use wireless updates after flashing.")}</span></div>
         {resetStep ? <div className="reset-connect-prompt" role="alertdialog" aria-live="assertive">
           <strong>{resetStep === "hold" ? c("现在按住小车 RESET，不要松开", "Press and keep holding the vehicle RESET button") : c("现在松开小车 RESET", "Release the vehicle RESET button now")}</strong>

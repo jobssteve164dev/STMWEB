@@ -51,6 +51,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
      VALUES ($1,$2,'集成测试','验证权限边界',ARRAY['devices:read','builds:create','artifacts:read'], $3,$4) RETURNING id`,
     [user.rows[0].id, workspaces.rows[0].id, createHash("sha256").update(credential).digest("hex"), credential.slice(-6)],
   );
+  await pool.query(`UPDATE api_connections SET scopes=scopes||'builds:read'::text WHERE id=$1`, [connection.rows[0].id]);
 
   const app = express();
   app.use("/api/v1", apiRouter);
@@ -68,6 +69,20 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal(bootstrap.status, 200);
     const bootstrapBody = await bootstrap.json() as { workspaces: Array<{ id: string }> };
     assert.deepEqual(bootstrapBody.workspaces.map((item) => item.id), [workspaces.rows[0].id]);
+
+    const templatesResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects/templates`, { headers });
+    assert.equal(templatesResponse.status, 200);
+    const templatesBody = await templatesResponse.json() as { templates: Array<{ hardwareProfileId: string; adapterVersion: string; target: string }> };
+    const compactTemplate = templatesBody.templates.find((item) => item.target === "stm32f103c8");
+    assert.ok(compactTemplate);
+    const hardwareProjectResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
+      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate }),
+    });
+    assert.equal(hardwareProjectResponse.status, 201);
+    const hardwareProjectBody = await hardwareProjectResponse.json() as { hardwareProject: { id: string } };
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
+      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate }),
+    })).status, 409);
 
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, { headers })).status, 200);
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, {
@@ -120,6 +135,67 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     const firmwareContent = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware/${firmwareBody.firmware.id}/content`, { headers });
     assert.equal(firmwareContent.status, 200);
     assert.deepEqual(Buffer.from(await firmwareContent.arrayBuffer()), firmwareBytes);
+
+    const completeBytes = readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex");
+    const sourceBytes = Buffer.from("phase-b-source");
+    const sourceSha256 = createHash("sha256").update(sourceBytes).digest("hex");
+    const runner = await pool.query<{ id: string }>(
+      `INSERT INTO build_runners (workspace_id,name,token_hash,capabilities,status,last_seen_at)
+       VALUES ($1,'集成测试 Runner',$2,'{}'::jsonb,'online',now()) RETURNING id`,
+      [workspaces.rows[0].id, createHash("sha256").update(randomBytes(32)).digest("hex")],
+    );
+    const job = await pool.query<{ id: string }>(
+      `INSERT INTO build_jobs
+         (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,source_name,source_sha256,source_content,status,progress)
+       VALUES ($1,$2,$3,$4,'DOT 标准固件','stm32-cmake-gcc-v1','stm32f103c8','1','1','source.zip',$5,$6,'running',100) RETURNING id`,
+      [workspaces.rows[0].id, runner.rows[0].id, hardwareProjectBody.hardwareProject.id, user.rows[0].id, sourceSha256, sourceBytes],
+    );
+    const generatedArtifacts = [
+      { buildFile: "dot_v1_initial_swd.hex", role: "complete-image", format: "ihex", flashMethods: ["swd"], bytes: completeBytes, kind: "hex" },
+      { buildFile: "dot_v1.bin", role: "application", format: "bin", flashMethods: ["swd", "bluetooth"], bytes: firmwareBytes, kind: "bin" },
+    ].map((item) => ({ ...item, size: item.bytes.byteLength, sha256: createHash("sha256").update(item.bytes).digest("hex") }));
+    const generatedManifest = {
+      schemaVersion: 1,
+      adapter: { id: "stmweb.dot-v1", version: "1" },
+      hardware: { profileId: "stmweb.dot-v1", revision: "1", target: "stm32f103c8", mcuFamily: "stm32f103", deviceIds: [1040], flashBytes: 65536 },
+      runtime: { version: "1", debugProtocol: "1", bootProtocol: "1", transports: ["swd", "bluetooth-uart"] },
+      memory: { applicationBase: 0x08001000, applicationLimit: 0x0800fc00 },
+      artifacts: generatedArtifacts.map(({ bytes: _bytes, kind: _kind, ...artifact }) => artifact),
+      validation: { status: "verified", checks: ["vectors", "layout", "capacity", "factory-metadata", "sha256"] },
+      source: { name: "source.zip", sha256: sourceSha256 },
+      build: { profile: "stm32-cmake-gcc-v1", target: "stm32f103c8", environmentVersion: "test" },
+    };
+    for (const artifact of generatedArtifacts) {
+      await pool.query(
+        `INSERT INTO build_artifacts (job_id,name,kind,sha256,size,content) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [job.rows[0].id, artifact.buildFile, artifact.kind, artifact.sha256, artifact.size, artifact.bytes],
+      );
+    }
+    const manifestBytes = Buffer.from(JSON.stringify(generatedManifest));
+    await pool.query(
+      `INSERT INTO build_artifacts (job_id,name,kind,sha256,size,content) VALUES ($1,'firmware-manifest.json','report',$2,$3,$4)`,
+      [job.rows[0].id, createHash("sha256").update(manifestBytes).digest("hex"), manifestBytes.byteLength, manifestBytes],
+    );
+    const registrationClient = await pool.connect();
+    let packageId: string;
+    try {
+      const { registerGeneratedFirmwarePackage } = await import("../server/firmware-package-registration.js");
+      packageId = await registerGeneratedFirmwarePackage(registrationClient, job.rows[0].id);
+    } finally { registrationClient.release(); }
+    await pool.query(`UPDATE build_jobs SET status='succeeded',finished_at=now() WHERE id=$1`, [job.rows[0].id]);
+
+    const generatedList = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware`, { headers });
+    assert.equal(generatedList.status, 200);
+    const generatedListBody = await generatedList.json() as { firmware: Array<{ packageId: string | null; artifactRole: string; status: string }> };
+    assert.equal(generatedListBody.firmware.filter((item) => item.packageId === packageId).length, 2);
+    assert.deepEqual(generatedListBody.firmware.filter((item) => item.packageId === packageId).map((item) => item.artifactRole).sort(), ["application", "complete-image"]);
+    const stableResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware-packages/${packageId}/stable`, { method: "POST", headers, body: "{}" });
+    assert.equal(stableResponse.status, 200);
+    const buildsResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/builds`, { headers });
+    assert.equal(buildsResponse.status, 200);
+    const buildsBody = await buildsResponse.json() as { builds: Array<{ id: string; packageId: string; packageStatus: string }> };
+    assert.equal(buildsBody.builds.find((item) => item.id === job.rows[0].id)?.packageId, packageId);
+    assert.equal(buildsBody.builds.find((item) => item.id === job.rows[0].id)?.packageStatus, "stable");
 
     await pool.query(`UPDATE api_connections SET status='revoked',revoked_at=now() WHERE id=$1`, [connection.rows[0].id]);
     assert.equal((await fetch(`${base}/bootstrap`, { headers })).status, 401);

@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:f
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
 const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.1.0";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
@@ -196,14 +196,26 @@ async function execute(stateDir, state, job) {
       return;
     }
     if (status !== 0) throw new Error(`固件编译失败，退出码 ${status}`);
+    const generatedManifestFile = path.join(output, "build", "stmweb_firmware_manifest.json");
+    const generatedManifest = JSON.parse(await readFile(generatedManifestFile, "utf8"));
+    if (generatedManifest.schemaVersion !== 1 || generatedManifest.adapter?.id !== job.hardwareProfileId
+      || generatedManifest.adapter?.version !== job.adapterVersion || generatedManifest.runtime?.version !== job.runtimeVersion
+      || generatedManifest.hardware?.target !== job.target || !Array.isArray(generatedManifest.artifacts)) {
+      throw new Error("构建结果没有形成匹配硬件项目的标准固件包");
+    }
+    generatedManifest.source = { name: job.sourceName, sha256: job.sourceSha256 };
+    generatedManifest.build = { profile: job.profile, target: job.target, environmentVersion: BUILD_IMAGE };
+    const finalManifestFile = path.join(output, "firmware-manifest.json");
+    await writeFile(finalManifestFile, `${JSON.stringify(generatedManifest, null, 2)}\n`);
     const candidates = [];
     const find = spawnSync("find", [path.join(output, "build"), "-type", "f", "(", "-name", "*.elf", "-o", "-name", "*.hex", "-o", "-name", "*.bin", "-o", "-name", "*.map", ")"], { encoding: "utf8" });
     for (const file of find.stdout.trim().split("\n").filter(Boolean)) candidates.push(file);
-    candidates.push(logFile);
+    candidates.push(logFile, finalManifestFile);
     const artifacts = [];
     for (const file of candidates) {
       const extension = path.extname(file).slice(1).toLowerCase();
-      artifacts.push(await uploadArtifact(state, job, file, extension === "log" ? "log" : extension));
+      const kind = path.basename(file) === "firmware-manifest.json" ? "report" : extension === "log" ? "log" : extension;
+      artifacts.push(await uploadArtifact(state, job, file, kind));
     }
     await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "completed", "构建完成", { artifactCount: artifacts.length })]);
   } finally {

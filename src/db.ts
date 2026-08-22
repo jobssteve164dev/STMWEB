@@ -39,6 +39,9 @@ export interface FirmwareVersionRecord {
   applicationLimit: number | null;
   runtimeVersion: string | null;
   status: "draft" | "verified" | "stable" | "retired";
+  packageId?: string | null;
+  packageName?: string | null;
+  hardwareProjectName?: string | null;
   createdAt: string;
   blob?: Blob;
 }
@@ -89,6 +92,10 @@ export interface BuildJobRecord {
   name: string;
   profile: string;
   target: string;
+  hardwareProjectId?: string;
+  hardwareProjectName?: string;
+  packageId?: string;
+  packageStatus?: "verified" | "stable" | "retired";
   sourceName: string;
   sourceSha256: string;
   status: "queued" | "leased" | "running" | "succeeded" | "failed" | "cancelled";
@@ -96,6 +103,29 @@ export interface BuildJobRecord {
   error?: string;
   createdAt: string;
   artifacts: BuildArtifactRecord[];
+}
+
+export interface HardwareProjectRecord {
+  id: string;
+  name: string;
+  hardwareProfileId: string;
+  adapterVersion: string;
+  runtimeVersion: string;
+  target: string;
+  status: "active" | "retired";
+  createdAt: string;
+}
+
+export interface HardwareTemplateRecord {
+  hardwareProfileId: string;
+  adapterVersion: string;
+  runtimeVersion: string;
+  adapterLabel: string;
+  buildProfile: string;
+  target: string;
+  targetLabel: string;
+  flashSize: number;
+  flashMethods: Array<"swd" | "bluetooth">;
 }
 
 let activeWorkspaceId = "";
@@ -215,6 +245,29 @@ export async function listBuildRunners(): Promise<BuildRunnerRecord[]> {
   return result.runners;
 }
 
+export async function listHardwareProjects(): Promise<HardwareProjectRecord[]> {
+  const result = await requestJson<{ hardwareProjects: HardwareProjectRecord[] }>(`/api/workspaces/${workspaceId()}/hardware-projects`);
+  return result.hardwareProjects;
+}
+
+export async function listHardwareTemplates(): Promise<HardwareTemplateRecord[]> {
+  const result = await requestJson<{ templates: HardwareTemplateRecord[] }>(`/api/workspaces/${workspaceId()}/hardware-projects/templates`);
+  return result.templates;
+}
+
+export async function createHardwareProject(input: { name: string; template: HardwareTemplateRecord }): Promise<HardwareProjectRecord> {
+  const result = await requestJson<{ hardwareProject: HardwareProjectRecord }>(`/api/workspaces/${workspaceId()}/hardware-projects`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      hardwareProfileId: input.template.hardwareProfileId,
+      adapterVersion: input.template.adapterVersion,
+      target: input.template.target,
+    }),
+  });
+  return result.hardwareProject;
+}
+
 export async function createRunnerPairing(): Promise<{ code: string; expiresAt: string; command: string }> {
   return requestJson(`/api/workspaces/${workspaceId()}/runners/pairing`, { method: "POST", body: "{}" });
 }
@@ -227,20 +280,24 @@ export async function listBuildJobs(): Promise<BuildJobRecord[]> {
 export async function createBuildJob(input: {
   runnerId: string;
   name: string;
-  target: "stm32f103c8" | "stm32f103cb";
+  hardwareProjectId: string;
   source: File;
 }): Promise<{ id: string; sha256: string }> {
   const form = new FormData();
   form.set("runnerId", input.runnerId);
   form.set("name", input.name);
   form.set("profile", "stm32-cmake-gcc-v1");
-  form.set("target", input.target);
+  form.set("hardwareProjectId", input.hardwareProjectId);
   form.set("source", input.source, input.source.name);
   return requestJson(`/api/workspaces/${workspaceId()}/builds`, { method: "POST", body: form });
 }
 
 export async function cancelBuildJob(jobId: string): Promise<void> {
   await requestJson(`/api/workspaces/${workspaceId()}/builds/${jobId}/cancel`, { method: "POST", body: "{}" });
+}
+
+export async function publishFirmwarePackage(packageId: string): Promise<void> {
+  await requestJson(`/api/workspaces/${workspaceId()}/firmware-packages/${packageId}/stable`, { method: "POST", body: "{}" });
 }
 
 export function buildArtifactUrl(jobId: string, artifactId: string): string {

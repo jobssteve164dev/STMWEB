@@ -67,6 +67,23 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE INDEX IF NOT EXISTS devices_workspace_idx ON devices(workspace_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS hardware_projects (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  name text NOT NULL CHECK (length(name) BETWEEN 1 AND 160),
+  hardware_profile_id text NOT NULL,
+  adapter_version text NOT NULL,
+  runtime_version text NOT NULL,
+  target text NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (workspace_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS hardware_projects_workspace_idx ON hardware_projects(workspace_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS firmware_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -212,10 +229,13 @@ CREATE TABLE IF NOT EXISTS build_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   runner_id uuid NOT NULL REFERENCES build_runners(id) ON DELETE RESTRICT,
+  hardware_project_id uuid REFERENCES hardware_projects(id) ON DELETE RESTRICT,
   created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
   name text NOT NULL,
   profile text NOT NULL,
   target text NOT NULL,
+  adapter_version text,
+  runtime_version text,
   source_name text NOT NULL,
   source_sha256 text NOT NULL CHECK (length(source_sha256) = 64),
   source_content bytea NOT NULL,
@@ -233,6 +253,10 @@ CREATE TABLE IF NOT EXISTS build_jobs (
 
 CREATE INDEX IF NOT EXISTS build_jobs_workspace_idx ON build_jobs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS build_jobs_runner_queue_idx ON build_jobs(runner_id, status, created_at);
+
+ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS hardware_project_id uuid REFERENCES hardware_projects(id) ON DELETE RESTRICT;
+ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS adapter_version text;
+ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS runtime_version text;
 
 ALTER TABLE build_runners DROP CONSTRAINT IF EXISTS build_runners_current_job_id_fkey;
 ALTER TABLE build_runners ADD CONSTRAINT build_runners_current_job_id_fkey
@@ -264,6 +288,44 @@ CREATE TABLE IF NOT EXISTS build_artifacts (
 );
 
 CREATE INDEX IF NOT EXISTS build_artifacts_job_idx ON build_artifacts(job_id, created_at);
+
+CREATE TABLE IF NOT EXISTS firmware_packages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  hardware_project_id uuid NOT NULL REFERENCES hardware_projects(id) ON DELETE RESTRICT,
+  build_job_id uuid NOT NULL UNIQUE REFERENCES build_jobs(id) ON DELETE RESTRICT,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  name text NOT NULL,
+  hardware_profile_id text NOT NULL,
+  adapter_version text NOT NULL,
+  runtime_version text NOT NULL,
+  target text NOT NULL,
+  source_sha256 text NOT NULL CHECK (length(source_sha256) = 64),
+  manifest jsonb NOT NULL CHECK (jsonb_typeof(manifest) = 'object'),
+  status text NOT NULL DEFAULT 'verified' CHECK (status IN ('verified','stable','retired')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS firmware_packages_workspace_idx ON firmware_packages(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS firmware_package_artifacts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  package_id uuid NOT NULL REFERENCES firmware_packages(id) ON DELETE CASCADE,
+  file_name text NOT NULL,
+  file_size bigint NOT NULL CHECK (file_size >= 0),
+  file_type text NOT NULL,
+  sha256 text NOT NULL CHECK (length(sha256) = 64),
+  content bytea NOT NULL,
+  artifact_role text NOT NULL CHECK (artifact_role IN ('complete-image','application')),
+  flash_methods text[] NOT NULL CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]),
+  flash_size integer NOT NULL,
+  application_base integer NOT NULL,
+  application_limit integer NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (package_id, artifact_role)
+);
+
+CREATE INDEX IF NOT EXISTS firmware_package_artifacts_package_idx ON firmware_package_artifacts(package_id, created_at);
 `;
 
 export async function migrateDatabase(): Promise<void> {

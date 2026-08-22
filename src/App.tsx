@@ -78,6 +78,7 @@ import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.j
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
 import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
 import { SwdFlashPanel } from "./InitialSwdFlashPanel.js";
+import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
 import { useLocale } from "./i18n.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
@@ -302,6 +303,12 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     return () => {
       active = false;
     };
+  }, [workspace.id]);
+
+  useEffect(() => {
+    const refreshFirmware = () => void listFirmwareVersions().then(setFirmwareVersions).catch(handleStorageError);
+    window.addEventListener("stmweb:firmware-updated", refreshFirmware);
+    return () => window.removeEventListener("stmweb:firmware-updated", refreshFirmware);
   }, [workspace.id]);
 
   useEffect(() => {
@@ -764,6 +771,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   telemetry={telemetrySnapshot}
                   isDemo={Boolean(connectionInfo?.isDemo)}
                   proAccess={planAccess.pro}
+                  onOpenFirmware={() => setActiveView("firmware")}
                   onChange={updateSelectedComponents}
                 />
               ) : connectionInfo ? (
@@ -846,12 +854,13 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   <DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} />
                 </div>
               </section>
+              <BuildRunnerPanel proAccess={planAccess.pro} />
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
               <div className="artifact-grid">
                 {combinedFirmware.map((version) => (
                   <article className="artifact-card" key={version.id}>
                     <span className="artifact-icon"><FileCode2 size={21} /></span>
-                    <div className="artifact-main"><div><strong>{version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件", "Complete image") : c("应用固件", "Application")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                    <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
                     <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
                   </article>
                 ))}

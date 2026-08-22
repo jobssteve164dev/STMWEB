@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
+COPY firmware-adapters/dot-v1/adapter.json ./firmware-adapters/dot-v1/adapter.json
 COPY deploy ./deploy
 COPY runner/stmweb-runner.mjs runner/install-runner.sh ./runner/
 RUN chmod +x /app/deploy/database-migrate

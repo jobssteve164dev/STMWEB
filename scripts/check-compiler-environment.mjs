@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, classicArchiveExporter, runner, dockerfile, dockerignore, schema] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, packageManifest] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
@@ -12,11 +12,17 @@ const [workflow, release, installer, packageInstaller, packageBuilder, packageVe
   read("scripts/export-classic-docker-archive.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
+  read("Dockerfile"),
   read(".dockerignore"),
   read("contracts/compiler-environment.schema.json"),
+  read("firmware-adapters/dot-v1/adapter.json"),
+  read("firmware-adapters/dot-v1/write-package-manifest.mjs"),
 ]);
 
 JSON.parse(schema);
+const adapterContract = JSON.parse(adapter);
+assert.equal(adapterContract.adapterId, "stmweb.dot-v1");
+assert.deepEqual(adapterContract.targets.map((target) => target.id), ["stm32f103c8", "stm32f103cb"]);
 assert.match(workflow, /platforms: linux\/amd64/);
 assert.match(workflow, /load: true[\s\S]*provenance: false[\s\S]*sbom: false/);
 assert.match(workflow, /build-compiler-environment-release\.sh/);
@@ -46,8 +52,12 @@ assert.match(runner, /imageReady\(\)/);
 assert.match(runner, /--code-file/);
 assert.match(runner, /\/opt\/stmweb\/adapters\/dot-v1/);
 assert.match(runner, /path\.join\(stateDir, \"build-history\"\)/);
+assert.match(runner, /stmweb_firmware_manifest\.json/);
+assert.match(runner, /firmware-manifest\.json/);
 assert.doesNotMatch(runner, /mkdtemp\(path\.join\(tmpdir\(\)/);
 assert.match(dockerfile, /COPY firmware-adapters\/dot-v1/);
+assert.match(webDockerfile, /COPY firmware-adapters\/dot-v1\/adapter\.json/);
+assert.match(packageManifest, /stmweb_firmware_manifest\.json/);
 assert.match(dockerfile, /FROM node:22-bookworm-slim/);
 assert.match(dockerfile, /FROM docker:27-cli AS docker_cli/);
 assert.match(dockerfile, /unzip/);

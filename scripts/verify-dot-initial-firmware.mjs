@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const buildDirectory = path.resolve(process.argv[2] || "output/firmware/dot-v1");
 const target = process.argv[3] || "stm32f103cb";
 const layout = target === "stm32f103c8"
-  ? { flashEnd: 0x08010000, appBase: 0x08001000, appLimit: 0x0800fc00 }
-  : { flashEnd: 0x08020000, appBase: 0x08004000, appLimit: 0x0801fc00 };
+  ? { flashSize: 64 * 1024, flashEnd: 0x08010000, appBase: 0x08001000, appLimit: 0x0800fc00 }
+  : { flashSize: 128 * 1024, flashEnd: 0x08020000, appBase: 0x08004000, appLimit: 0x0801fc00 };
 
 function parseHex(fileName) {
   const bytes = new Map();
@@ -49,6 +50,24 @@ function assertSubset(expected, combined, label) {
 const bootloader = parseHex("dot_v1_bootloader.hex");
 const application = parseHex("dot_v1.hex");
 const combined = parseHex("dot_v1_initial_swd.hex");
+const manifest = JSON.parse(readFileSync(path.join(buildDirectory, "stmweb_firmware_manifest.json"), "utf8"));
+
+assert.equal(manifest.schemaVersion, 1, "firmware manifest schema is unsupported");
+assert.equal(manifest.adapter.id, "stmweb.dot-v1", "firmware manifest has the wrong adapter");
+assert.equal(manifest.hardware.target, target, "firmware manifest has the wrong target");
+assert.equal(manifest.hardware.flashBytes, layout.flashSize, "firmware manifest has the wrong flash size");
+assert.equal(manifest.memory.applicationBase, layout.appBase, "firmware manifest has the wrong application base");
+assert.equal(manifest.memory.applicationLimit, layout.appLimit, "firmware manifest has the wrong application limit");
+assert.equal(manifest.validation.status, "verified", "firmware manifest is not verified");
+assert.deepEqual(manifest.artifacts.map((artifact) => [artifact.buildFile, artifact.role, artifact.flashMethods]), [
+  ["dot_v1_initial_swd.hex", "complete-image", ["swd"]],
+  ["dot_v1.bin", "application", ["swd", "bluetooth"]],
+]);
+for (const artifact of manifest.artifacts) {
+  const bytes = readFileSync(path.join(buildDirectory, artifact.buildFile));
+  assert.equal(artifact.size, bytes.byteLength, `${artifact.buildFile} manifest size is invalid`);
+  assert.equal(artifact.sha256, createHash("sha256").update(bytes).digest("hex"), `${artifact.buildFile} manifest digest is invalid`);
+}
 
 assertSubset(bootloader, combined, "bootloader");
 assertSubset(application, combined, "application");

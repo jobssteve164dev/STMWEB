@@ -306,4 +306,5 @@ int main(void) {
     runApplication();
   }
   receiveFrames(0u);
+  return 0;
 }

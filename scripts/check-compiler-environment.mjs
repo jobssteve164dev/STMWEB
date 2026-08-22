@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, packageManifest] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, compilerImageTest, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, packageManifest, bootloader] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
   read("runner/install-runner-package.sh"),
   read("scripts/build-firmware-compilation-release.sh"),
   read("scripts/verify-firmware-compilation-release.sh"),
+  read("scripts/test-firmware-compiler-image.sh"),
   read("scripts/export-classic-docker-archive.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
@@ -17,6 +18,7 @@ const [workflow, release, installer, packageInstaller, packageBuilder, packageVe
   read("contracts/compiler-environment.schema.json"),
   read("firmware-adapters/dot-v1/adapter.json"),
   read("firmware-adapters/dot-v1/write-package-manifest.mjs"),
+  read("firmware-adapters/dot-v1/stmweb_bootloader.c"),
 ]);
 
 JSON.parse(schema);
@@ -26,6 +28,7 @@ assert.deepEqual(adapterContract.targets.map((target) => target.id), ["stm32f103
 assert.match(workflow, /platforms: linux\/amd64/);
 assert.match(workflow, /load: true[\s\S]*provenance: false[\s\S]*sbom: false/);
 assert.match(workflow, /build-compiler-environment-release\.sh/);
+assert.match(workflow, /npm run test:compiler-image/);
 assert.match(release, /docker save/);
 assert.match(release, /imageId/);
 assert.match(installer, /docker image inspect/);
@@ -42,6 +45,10 @@ assert.match(packageBuilder, /stmweb-firmware-compilation-linux-amd64/);
 assert.match(packageBuilder, /build_context_bytes/);
 assert.match(packageBuilder, /largest_source_contributors/);
 assert.match(packageVerifier, /package member set is invalid/);
+assert.match(packageVerifier, /test-firmware-compiler-image\.sh/);
+assert.match(compilerImageTest, /for target in stm32f103cb stm32f103c8/);
+assert.match(compilerImageTest, /cmake --build "\$output" --parallel 1/);
+assert.match(compilerImageTest, /verify-dot-initial-firmware\.mjs/);
 assert.match(packageInstaller, /--code-file \/run\/stmweb-pairing-code/);
 assert.doesNotMatch(packageInstaller, /--code \"\$PAIRING_CODE\"/);
 assert.match(packageInstaller, /EXISTING_REGISTRATION/);
@@ -62,6 +69,7 @@ assert.doesNotMatch(runner, /mkdtemp\(path\.join\(tmpdir\(\)/);
 assert.match(dockerfile, /COPY firmware-adapters\/dot-v1/);
 assert.match(webDockerfile, /COPY firmware-adapters\/dot-v1\/adapter\.json/);
 assert.match(packageManifest, /stmweb_firmware_manifest\.json/);
+assert.match(bootloader, /receiveFrames\(0u\);\s+return 0;/);
 assert.match(dockerfile, /FROM node:22-bookworm-slim/);
 assert.match(dockerfile, /FROM docker:27-cli AS docker_cli/);
 assert.match(dockerfile, /unzip/);

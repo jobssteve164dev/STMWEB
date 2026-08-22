@@ -14,6 +14,7 @@
     "test": "tsx --test tests/**/*.test.ts",
     "check": "npm run check:compiler && npm run typecheck && npm run build && npm run check:firmware-asset",
     "check:compiler": "node scripts/check-compiler-environment.mjs",
+    "test:compiler-image": "bash scripts/test-firmware-compiler-image.sh",
     "check:firmware-asset": "node scripts/verify-deployed-firmware-asset.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "start": "node dist-server/index.js"

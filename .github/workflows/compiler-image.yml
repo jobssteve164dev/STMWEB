@@ -46,6 +46,7 @@ jobs:
       - name: Verify release contract
         run: |
           node scripts/check-compiler-environment.mjs
+          npm run test:compiler-image -- "stmweb/compiler:${{ inputs.version }}"
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' stmweb/compiler:${{ inputs.version }})" = "linux/amd64"
           sha256sum -c <(node -e 'const m=require(process.argv[1]); console.log(`${m.artifact.sha256}  ${{ runner.temp }}/compiler-environment/${m.artifact.asset}`)' "${{ runner.temp }}/compiler-environment/manifest.json")
       - uses: softprops/action-gh-release@v2

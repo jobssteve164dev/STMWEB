@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { z } from "zod";
 import { getFirmwareAdapterTarget } from "./firmware-adapter-registry.js";
-import { inspectFirmwareArtifact } from "./firmware-artifact.js";
+import { firmwareContainsPayload, inspectFirmwareArtifact } from "./firmware-artifact.js";
+
+const firmwareConfigurationSchema = z.object({
+  schemaVersion: z.literal(1),
+  foundationModules: z.array(z.string()),
+  capabilityModules: z.array(z.string()),
+  connectionModules: z.array(z.string()),
+  flashMethods: z.array(z.enum(["swd", "bluetooth"])).min(1),
+});
 
 const manifestArtifactSchema = z.object({
   buildFile: z.string().min(1),
@@ -22,6 +30,7 @@ const generatedManifestSchema = z.object({
   validation: z.object({ status: z.literal("verified"), checks: z.array(z.string()).min(1) }),
   source: z.object({ name: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
   build: z.object({ profile: z.string(), target: z.string(), environmentVersion: z.string() }),
+  composition: firmwareConfigurationSchema,
 });
 
 interface BuildArtifactRow {
@@ -35,11 +44,12 @@ interface BuildArtifactRow {
 export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId: string): Promise<string> {
   const jobResult = await client.query<{
     workspaceId: string; hardwareProjectId: string | null; createdBy: string; name: string; profile: string; target: string;
-    sourceName: string; sourceSha256: string; adapterVersion: string | null; runtimeVersion: string | null; hardwareProfileId: string | null;
+    sourceName: string; sourceSha256: string; adapterVersion: string | null; runtimeVersion: string | null; hardwareProfileId: string | null; firmwareConfiguration: unknown;
   }>(
     `SELECT j.workspace_id AS "workspaceId",j.hardware_project_id AS "hardwareProjectId",j.created_by AS "createdBy",
             j.name,j.profile,j.target,j.source_name AS "sourceName",j.source_sha256 AS "sourceSha256",
-            j.adapter_version AS "adapterVersion",j.runtime_version AS "runtimeVersion",p.hardware_profile_id AS "hardwareProfileId"
+            j.adapter_version AS "adapterVersion",j.runtime_version AS "runtimeVersion",p.hardware_profile_id AS "hardwareProfileId",
+            j.firmware_configuration AS "firmwareConfiguration"
      FROM build_jobs j LEFT JOIN hardware_projects p ON p.id=j.hardware_project_id WHERE j.id=$1`,
     [jobId],
   );
@@ -51,6 +61,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   if (!registered || registered.adapter.runtimeVersion !== job.runtimeVersion || registered.adapter.buildProfile !== job.profile) {
     throw new Error("构建使用的硬件适配版本已不可用");
   }
+  const firmwareConfiguration = firmwareConfigurationSchema.parse(job.firmwareConfiguration);
 
   const artifactResult = await client.query<BuildArtifactRow>(
     `SELECT name,kind,sha256,size::text,content FROM build_artifacts WHERE job_id=$1`,
@@ -70,14 +81,16 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     || manifest.runtime.transports.join(",") !== adapter.runtime.transports.join(",")
     || manifest.memory.applicationBase !== target.applicationBase || manifest.memory.applicationLimit !== target.applicationLimit
     || manifest.source.sha256 !== job.sourceSha256 || manifest.source.name !== job.sourceName
-    || manifest.build.profile !== job.profile || manifest.build.target !== job.target) {
+    || manifest.build.profile !== job.profile || manifest.build.target !== job.target
+    || JSON.stringify(manifest.composition) !== JSON.stringify(firmwareConfiguration)) {
     throw new Error("标准固件清单与构建任务不一致");
   }
 
   for (const expected of target.artifacts) {
     const declared = manifest.artifacts.find((artifact) => artifact.role === expected.role);
+    const expectedFlashMethods = expected.flashMethods.filter((method) => firmwareConfiguration.flashMethods.includes(method));
     if (!declared || declared.buildFile !== expected.buildFile || declared.format !== expected.format
-      || declared.flashMethods.join(",") !== expected.flashMethods.join(",")) {
+      || declared.flashMethods.join(",") !== expectedFlashMethods.join(",")) {
       throw new Error("标准固件清单的制品合同与硬件适配不一致");
     }
   }
@@ -88,6 +101,10 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     const actualSha256 = createHash("sha256").update(artifact.content).digest("hex");
     if (Number(artifact.size) !== descriptor.size || artifact.sha256 !== descriptor.sha256 || actualSha256 !== descriptor.sha256) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
+    }
+    const configurationPayload = new TextEncoder().encode(`STMWEB_CONFIG:${JSON.stringify(firmwareConfiguration)}`);
+    if (!firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload)) {
+      throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含当前模块配置`);
     }
     const inspected = inspectFirmwareArtifact(artifact.content, descriptor.buildFile, {
       hardwareProfileId: adapter.adapterId, adapterVersion: adapter.adapterVersion, target: target.id,

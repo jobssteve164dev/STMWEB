@@ -10,7 +10,7 @@ const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner
 const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.1.0";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1"]);
-const allowedTargets = new Set(["stm32f103c8", "stm32f103cb"]);
+let supportedAdapterTargetCache;
 
 function value(args, flag, fallback) {
   const index = args.indexOf(flag);
@@ -60,10 +60,21 @@ function capabilities() {
     architecture: process.arch,
     backend: docker.status === 0 && imageReady() ? "docker" : "unavailable",
     environmentVersion: BUILD_IMAGE,
+    firmwareCompositionVersion: 1,
     maxConcurrentBuilds: 1,
     diskFreeMb,
-    toolchains: [{ id: "arm-none-eabi-gcc", version: "container-pinned", targets: [...allowedTargets] }],
+    toolchains: [{ id: "arm-none-eabi-gcc", version: "container-pinned", targets: supportedAdapterTargets().map((item) => item.target) }],
   };
+}
+
+function supportedAdapterTargets() {
+  if (supportedAdapterTargetCache) return supportedAdapterTargetCache;
+  if (!imageReady()) return [];
+  const script = `const fs=require("fs"),p="/opt/stmweb/adapters";const out=[];for(const d of fs.readdirSync(p)){const f=p+"/"+d+"/adapter.json";if(!fs.existsSync(f))continue;const a=JSON.parse(fs.readFileSync(f));for(const t of a.targets||[])out.push({hardwareProfileId:a.adapterId,adapterVersion:a.adapterVersion,target:t.id,buildDirectory:a.buildDirectory});}process.stdout.write(JSON.stringify(out));`;
+  const result = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "node", BUILD_IMAGE, "-e", script], { encoding: "utf8", timeout: 20_000 });
+  if (result.status !== 0) return [];
+  try { supportedAdapterTargetCache = JSON.parse(result.stdout); } catch { supportedAdapterTargetCache = []; }
+  return supportedAdapterTargetCache;
 }
 
 function imageReady() {
@@ -142,8 +153,34 @@ async function uploadArtifact(state, job, file, kind) {
   return { name, kind, sha256: sha256(content), size: content.length };
 }
 
+function canonicalFirmwareConfiguration(value) {
+  if (!value || value.schemaVersion !== 1) throw new Error("构建任务缺少有效的固件模块配置");
+  const fields = ["foundationModules", "capabilityModules", "connectionModules", "flashMethods"];
+  if (fields.some((field) => !Array.isArray(value[field]) || value[field].some((item) => typeof item !== "string"))) {
+    throw new Error("构建任务中的固件模块配置格式无效");
+  }
+  return {
+    schemaVersion: 1,
+    foundationModules: [...value.foundationModules],
+    capabilityModules: [...value.capabilityModules],
+    connectionModules: [...value.connectionModules],
+    flashMethods: [...value.flashMethods],
+  };
+}
+
+function firmwareConfigurationSource(configuration) {
+  const marker = Buffer.from(`STMWEB_CONFIG:${JSON.stringify(configuration)}\0`, "utf8");
+  const values = [...marker].map((value) => `0x${value.toString(16).padStart(2, "0")}`).join(",");
+  return `#include <stdint.h>\n__attribute__((used,section(".stmweb_config"))) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
+}
+
 async function execute(stateDir, state, job) {
-  if (!allowedProfiles.has(job.profile) || !allowedTargets.has(job.target)) throw new Error("Runner 不支持该构建配置");
+  if (!allowedProfiles.has(job.profile) || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(job.target)
+    || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(job.adapterBuildDirectory)) throw new Error("Runner 不支持该构建配置");
+  const supported = supportedAdapterTargets().some((item) => item.hardwareProfileId === job.hardwareProfileId
+    && item.adapterVersion === job.adapterVersion && item.target === job.target && item.buildDirectory === job.adapterBuildDirectory);
+  if (!supported) throw new Error("编译环境不包含这个硬件适配版本");
+  const firmwareConfiguration = canonicalFirmwareConfiguration(job.firmwareConfiguration);
   const retainedRoot = path.join(stateDir, "build-history");
   await mkdir(retainedRoot, { recursive: true, mode: 0o700 });
   const root = await mkdtemp(path.join(retainedRoot, `${job.id}-`));
@@ -152,6 +189,8 @@ async function execute(stateDir, state, job) {
   const output = path.join(root, "output");
   try {
     await mkdir(source); await mkdir(output);
+    const configurationSource = path.join(output, "stmweb_firmware_configuration.c");
+    await writeFile(configurationSource, firmwareConfigurationSource(firmwareConfiguration), { mode: 0o600 });
     const bytes = await request(state, job.sourceUrl);
     if (sha256(bytes) !== job.sourceSha256) throw new Error("源码包摘要不匹配");
     await writeFile(archive, bytes, { mode: 0o600 });
@@ -175,7 +214,8 @@ async function execute(stateDir, state, job) {
       }
       const relativeRoot = path.relative(source, projectRoot);
       if (relativeRoot.startsWith("..")) throw new Error("源码工程路径无效");
-      cmakeSource = "/opt/stmweb/adapters/dot-v1";
+      if (job.hardwareProfileId !== "stmweb.dot-v1") throw new Error("当前硬件适配器需要提供标准 CMake 源码入口");
+      cmakeSource = `/opt/stmweb/adapters/${job.adapterBuildDirectory}`;
       sourceOptions = ` -DSTMWEB_SOURCE_ROOT=${shellQuote(`/source/${relativeRoot.replaceAll("\\", "/")}`)}`;
     }
     if (!imageReady()) throw new Error("编译环境尚未由 GitOps Agent 正确安装或内容校验失败");
@@ -185,7 +225,7 @@ async function execute(stateDir, state, job) {
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
       BUILD_IMAGE, "sh", "-lc",
-      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target}${sourceOptions} && cmake --build /output/build --parallel 1`,
+      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c${sourceOptions} && cmake --build /output/build --parallel 1`,
     ];
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     const log = [];
@@ -228,6 +268,11 @@ async function execute(stateDir, state, job) {
     }
     generatedManifest.source = { name: job.sourceName, sha256: job.sourceSha256 };
     generatedManifest.build = { profile: job.profile, target: job.target, environmentVersion: BUILD_IMAGE };
+    generatedManifest.composition = firmwareConfiguration;
+    for (const artifact of generatedManifest.artifacts) {
+      artifact.flashMethods = artifact.flashMethods.filter((method) => firmwareConfiguration.flashMethods.includes(method));
+      if (!artifact.flashMethods.length) throw new Error(`固件模块配置没有为 ${artifact.role} 保留可用烧录方式`);
+    }
     const finalManifestFile = path.join(output, "firmware-manifest.json");
     await writeFile(finalManifestFile, `${JSON.stringify(generatedManifest, null, 2)}\n`);
     const candidates = [];

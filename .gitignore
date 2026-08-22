@@ -3,6 +3,7 @@ dist/
 dist-server/
 output/playwright/
 output/firmware/
+output/phase-c-composer-c8/
 .playwright-cli/
 .env
 .env.*

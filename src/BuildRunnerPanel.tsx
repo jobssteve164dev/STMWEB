@@ -22,6 +22,12 @@ const statusText: Record<BuildJobRecord["status"], string> = {
   queued: "等待编译", leased: "正在准备", running: "正在编译", succeeded: "编译完成", failed: "编译失败", cancelled: "已取消",
 };
 
+function formatArtifactSize(bytes: number, locale: string): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} KiB`;
+  return `${(bytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} MiB`;
+}
+
 export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
   const { isEnglish, locale } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
@@ -30,6 +36,8 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
   const [hardwareProjects, setHardwareProjects] = useState<HardwareProjectRecord[]>([]);
   const [hardwareTemplates, setHardwareTemplates] = useState<HardwareTemplateRecord[]>([]);
   const [pairing, setPairing] = useState<{ code: string; expiresAt: string; command: string } | null>(null);
+  const [templateKey, setTemplateKey] = useState("");
+  const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -90,15 +98,49 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
   async function createProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const template = hardwareTemplates.find((candidate) => `${candidate.hardwareProfileId}:${candidate.adapterVersion}:${candidate.target}` === form.get("template"));
+    const template = hardwareTemplates.find((candidate) => `${candidate.hardwareProfileId}:${candidate.adapterVersion}:${candidate.target}` === templateKey);
     if (!template) { setMessage(c("请选择硬件模板", "Choose a hardware template")); return; }
     setBusy(true);
     try {
-      await createHardwareProject({ name: String(form.get("projectName")), template });
-      event.currentTarget.reset();
+      await createHardwareProject({ name: String(form.get("projectName")), template, selectedModuleIds });
+      event.currentTarget.reset(); setTemplateKey(""); setSelectedModuleIds([]);
       await refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : c("无法创建硬件项目", "Unable to create the hardware project")); }
     finally { setBusy(false); }
+  }
+
+  const selectedTemplate = hardwareTemplates.find((candidate) => `${candidate.hardwareProfileId}:${candidate.adapterVersion}:${candidate.target}` === templateKey);
+  const selectableModules = selectedTemplate ? [...selectedTemplate.capabilityModules, ...selectedTemplate.connectionModules] : [];
+
+  function selectTemplate(value: string) {
+    setTemplateKey(value);
+    const template = hardwareTemplates.find((candidate) => `${candidate.hardwareProfileId}:${candidate.adapterVersion}:${candidate.target}` === value);
+    setSelectedModuleIds(template ? [...template.capabilityModules, ...template.connectionModules]
+      .filter((module) => module.defaultEnabled || module.required).map((module) => module.id) : []);
+  }
+
+  function toggleModule(moduleId: string, enabled: boolean) {
+    const next = new Set(selectedModuleIds);
+    if (enabled) {
+      const queue = [moduleId];
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (next.has(current)) continue;
+        next.add(current);
+        const module = selectableModules.find((candidate) => candidate.id === current);
+        if (module) queue.push(...module.requires);
+      }
+    } else {
+      next.delete(moduleId);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const module of selectableModules) {
+          if (next.has(module.id) && module.requires.some((dependency) => !next.has(dependency))) { next.delete(module.id); changed = true; }
+        }
+      }
+    }
+    setSelectedModuleIds([...next]);
   }
 
   async function publishPackage(packageId: string) {
@@ -111,19 +153,27 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
     finally { setBusy(false); }
   }
 
-  const available = runners.filter((runner) => runner.status === "online");
+  const available = runners.filter((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion === 1);
+  const needsUpdate = runners.some((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion !== 1);
   return (
     <article className="workbench-card build-runner-widget">
       <div className="widget-heading"><div><CloudCog size={18} /><strong>{c("标准固件生成", "Standard Firmware Generation")}</strong></div><button type="button" aria-label={c("刷新生成状态", "Refresh generation status")} onClick={() => void refresh()}><RefreshCw size={16} /></button></div>
-      <form className="hardware-project-form" onSubmit={(event) => void createProject(event)}>
-        <div><strong>{c("创建硬件项目", "Create hardware project")}</strong><span>{c("选择板卡和容量，平台会自动生成匹配的完整固件与应用固件。", "Choose the board and capacity. Matching complete and application firmware will be generated automatically.")}</span></div>
-        <label><span>{c("项目名称", "Project name")}</span><input name="projectName" required maxLength={160} placeholder={c("例如：我的 DOT 小车", "e.g. My DOT vehicle")} /></label>
-        <label><span>{c("板卡模板", "Board template")}</span><select name="template" required defaultValue=""><option value="" disabled>{c("选择板卡和容量", "Choose board and capacity")}</option>{hardwareTemplates.map((template) => <option key={`${template.hardwareProfileId}:${template.adapterVersion}:${template.target}`} value={`${template.hardwareProfileId}:${template.adapterVersion}:${template.target}`}>{template.adapterLabel} · {template.targetLabel}</option>)}</select></label>
-        <button className="secondary-button" type="submit" disabled={busy || hardwareTemplates.length === 0}><Plus size={16} />{c("创建", "Create")}</button>
+      <form className="firmware-composer" onSubmit={(event) => void createProject(event)}>
+        <div className="composer-heading"><div><strong>{c("组装标准固件", "Compose standard firmware")}</strong><span>{c("选择硬件和需要的能力，其余启动、恢复和校验模块由平台自动完成。", "Choose the hardware and capabilities. Boot, recovery and validation are assembled automatically.")}</span></div><span className="composer-step">1</span></div>
+        <div className="composer-basics">
+          <label><span>{c("固件项目名称", "Firmware project name")}</span><input name="projectName" required maxLength={160} placeholder={c("例如：我的 DOT 小车", "e.g. My DOT vehicle")} /></label>
+          <label><span>{c("板卡模板", "Board template")}</span><select name="template" required value={templateKey} onChange={(event) => selectTemplate(event.target.value)}><option value="" disabled>{c("选择板卡和容量", "Choose board and capacity")}</option>{hardwareTemplates.map((template) => <option key={`${template.hardwareProfileId}:${template.adapterVersion}:${template.target}`} value={`${template.hardwareProfileId}:${template.adapterVersion}:${template.target}`}>{template.adapterLabel} · {template.targetLabel}</option>)}</select></label>
+        </div>
+        {selectedTemplate ? <div className="composer-board">
+          <fieldset className="composer-module-group"><legend>{c("添加功能", "Add capabilities")}</legend><p>{c("只选择这份固件实际需要提供的能力。依赖项会自动加入。", "Select only the capabilities this firmware needs. Dependencies are added automatically.")}</p><div className="composer-module-grid">{selectedTemplate.capabilityModules.map((module) => <label className={selectedModuleIds.includes(module.id) ? "composer-module selected" : "composer-module"} key={module.id}><input type="checkbox" checked={selectedModuleIds.includes(module.id)} onChange={(event) => toggleModule(module.id, event.target.checked)} /><span><strong>{isEnglish ? module.label.en : module.label.zh}</strong><small>{isEnglish ? module.description.en : module.description.zh}</small></span><Check size={16} /></label>)}</div></fieldset>
+          <fieldset className="composer-module-group"><legend>{c("连接方式", "Connections")}</legend><p>{c("SWD 始终用于安装、更新和恢复；硬件支持的无线方式可以按需加入。", "SWD always remains available for installation, updates and recovery. Supported wireless methods are optional.")}</p><div className="composer-module-grid connection">{selectedTemplate.connectionModules.map((module) => <label className={selectedModuleIds.includes(module.id) ? "composer-module selected" : "composer-module"} key={module.id}><input type="checkbox" checked={selectedModuleIds.includes(module.id)} disabled={module.required} onChange={(event) => toggleModule(module.id, event.target.checked)} /><span><strong>{isEnglish ? module.label.en : module.label.zh}</strong><small>{isEnglish ? module.description.en : module.description.zh}</small></span><Check size={16} /></label>)}</div></fieldset>
+          <div className="composer-foundation"><div><span>{c("平台自动装配", "Automatically assembled")}</span><strong>{selectedTemplate.foundationModules.map((module) => isEnglish ? module.label.en : module.label.zh).join(" · ")}</strong></div><div><span>{c("生成结果", "Generated output")}</span><strong>{c("完整固件 + 应用固件", "Complete firmware + application firmware")}</strong></div></div>
+          <button className="secondary-button composer-submit" type="submit" disabled={busy}><Plus size={16} />{c("保存固件配置", "Save firmware configuration")}</button>
+        </div> : <div className="composer-placeholder">{c("选择板卡后，即可配置这份固件的功能和连接方式。", "Choose a board to configure firmware capabilities and connections.")}</div>}
       </form>
-      {hardwareProjects.length ? <div className="hardware-project-list" aria-label={c("当前硬件项目", "Current hardware projects")}>{hardwareProjects.map((project) => <span key={project.id}><Check size={14} />{project.name}<small>{project.target.toUpperCase()} · {c("已就绪", "Ready")}</small></span>)}</div> : null}
+      {hardwareProjects.length ? <div className="hardware-project-list" aria-label={c("当前固件配置", "Current firmware configurations")}>{hardwareProjects.map((project) => <span key={project.id}><Check size={14} />{project.name}<small>{project.firmwareConfiguration.capabilityModules.length} {c("项能力", "capabilities")} · {project.firmwareConfiguration.flashMethods.map((method) => method === "swd" ? "SWD" : c("蓝牙", "Bluetooth")).join(" + ")}</small></span>)}</div> : null}
       <div className="runner-summary">
-        <div><span className={available.length ? "runner-status online" : "runner-status"}><i />{available.length ? c(`${available.length} 台生成设备可用`, `${available.length} build device${available.length === 1 ? "" : "s"} available`) : c("尚未连接生成设备", "No build device connected")}</span><small>{c("源码只在你连接的设备中处理", "Source code is processed only on your connected device")}</small></div>
+        <div><span className={available.length ? "runner-status online" : "runner-status"}><i />{available.length ? c(`${available.length} 台生成设备可用`, `${available.length} build device${available.length === 1 ? "" : "s"} available`) : needsUpdate ? c("生成设备需要更新", "Build device update required") : c("尚未连接生成设备", "No build device connected")}</span><small>{needsUpdate && !available.length ? c("重新连接后即可使用固件组装", "Reconnect it to use firmware composition") : c("源码只在你连接的设备中处理", "Source code is processed only on your connected device")}</small></div>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => void generatePairing()}>{busy ? <Loader2 className="spinning" size={16} /> : <Plus size={16} />}{c("连接编译算力", "Connect Runner")}</button>
       </div>
       {pairing ? <div className="pairing-command"><div><TerminalSquare size={17} /><strong>{c("在 x86 Linux 节点执行", "Run on the x86 Linux node")}</strong><span>{c("配对码将在", "Pairing code expires at")} {new Date(pairing.expiresAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}</span></div><code>{pairing.command}</code><button type="button" onClick={() => void navigator.clipboard.writeText(pairing.command)}><Clipboard size={15} />{c("复制命令", "Copy Command")}</button></div> : null}
@@ -143,9 +193,12 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
             <span className={`build-state ${job.status}`}>{job.status === "succeeded" ? <Check size={15} /> : job.status === "failed" ? <CircleAlert size={15} /> : <Loader2 className={job.status === "running" ? "spinning" : ""} size={15} />}</span>
             <div><strong>{job.name}</strong><span>{job.hardwareProjectName || job.target.toUpperCase()} · {isEnglish ? ({ queued: "Queued", leased: "Preparing", running: "Building", succeeded: "Complete", failed: "Failed", cancelled: "Cancelled" } as const)[job.status] : statusText[job.status]}</span>{job.packageId ? <small className="package-ready">{c("完整固件和应用固件已进入固件管理", "Complete and application firmware are ready in Firmware Management")}</small> : job.error ? <small>{job.error}</small> : null}</div>
             <span className="build-progress">{job.progress}%</span>
-            {job.packageId && job.packageStatus !== "stable" ? <button type="button" disabled={busy} onClick={() => void publishPackage(job.packageId!)}><Check size={14} />{c("设为稳定版", "Set as stable")}</button> : job.packageStatus === "stable" ? <span className="package-stable"><Check size={14} />{c("稳定版", "Stable")}</span> : null}
-            {job.artifacts.map((artifact) => <a key={artifact.id} href={buildArtifactUrl(job.id, artifact.id)} download><Download size={14} />{artifact.kind.toUpperCase()}</a>)}
-            {["queued", "leased", "running"].includes(job.status) ? <button type="button" aria-label={c(`取消 ${job.name}`, `Cancel ${job.name}`)} onClick={() => void cancelBuildJob(job.id).then(refresh)}><Square size={14} />{c("取消", "Cancel")}</button> : null}
+            <div className="build-result-actions">
+              {job.packageId && job.packageStatus !== "stable" ? <button type="button" disabled={busy} onClick={() => void publishPackage(job.packageId!)}><Check size={14} />{c("设为稳定版", "Set as stable")}</button> : job.packageStatus === "stable" ? <span className="package-stable"><Check size={14} />{c("稳定版", "Stable")}</span> : null}
+              {job.artifacts.filter((artifact) => artifact.artifactRole).sort((left) => left.artifactRole === "complete-image" ? -1 : 1).map((artifact) => <a key={artifact.id} href={buildArtifactUrl(job.id, artifact.id)} download><Download size={14} />{artifact.artifactRole === "complete-image" ? c("下载完整固件", "Download complete firmware") : c("下载应用固件", "Download application firmware")}</a>)}
+              {["queued", "leased", "running"].includes(job.status) ? <button type="button" aria-label={c(`取消 ${job.name}`, `Cancel ${job.name}`)} onClick={() => void cancelBuildJob(job.id).then(refresh)}><Square size={14} />{c("取消", "Cancel")}</button> : null}
+            </div>
+            {job.artifacts.some((artifact) => !artifact.artifactRole) ? <details className="build-artifact-details"><summary>{c("构建详情", "Build details")}<span>{job.artifacts.filter((artifact) => !artifact.artifactRole).length} {c("个高级制品", "advanced artifacts")}</span></summary><div>{job.artifacts.filter((artifact) => !artifact.artifactRole).map((artifact) => <a key={artifact.id} href={buildArtifactUrl(job.id, artifact.id)} download><Download size={14} /><span><strong>{artifact.name}</strong><small>{artifact.kind.toUpperCase()} · {formatArtifactSize(artifact.size, locale)}</small></span></a>)}</div></details> : null}
           </div>
         ))}
       </div>

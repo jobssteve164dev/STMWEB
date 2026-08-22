@@ -57,12 +57,22 @@ test("lists only compatible application images in Bluetooth flashing", () => {
   assert.doesNotMatch(html, /unverified\.bin/);
 });
 
-test("renders the phase B flow in Firmware Management using user actions", () => {
+test("renders the phase C firmware composer using user actions", () => {
   const html = renderToStaticMarkup(React.createElement(BuildRunnerPanel, { proAccess: true }));
   assert.match(html, /标准固件生成/);
-  assert.match(html, /创建硬件项目/);
-  assert.match(html, /平台会自动生成匹配的完整固件与应用固件/);
+  assert.match(html, /组装标准固件/);
+  assert.match(html, /启动、恢复和校验模块由平台自动完成/);
+  assert.match(html, /选择板卡后，即可配置这份固件的功能和连接方式/);
   assert.doesNotMatch(html, /固定适配与运行时版本/);
+});
+
+test("shows only named firmware downloads as primary actions and keeps technical files in details", async () => {
+  const source = await readFile("src/BuildRunnerPanel.tsx", "utf8");
+  assert.match(source, /下载完整固件/);
+  assert.match(source, /下载应用固件/);
+  assert.match(source, /<details className="build-artifact-details">/);
+  assert.match(source, /artifact\.name/);
+  assert.doesNotMatch(source, /artifact\.kind\.toUpperCase\(\)<\/a>/);
 });
 
 test("keeps the firmware list in a separate card below generation", async () => {

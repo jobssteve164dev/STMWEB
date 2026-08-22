@@ -5,6 +5,22 @@ import test from "node:test";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
+function intelHexRecord(address: number, type: number, bytes: Uint8Array): string {
+  const record = [bytes.byteLength, address >> 8 & 0xff, address & 0xff, type, ...bytes];
+  const checksum = (-record.reduce((sum, value) => sum + value, 0)) & 0xff;
+  return `:${[...record, checksum].map((value) => value.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
+function embedHexPayload(source: Buffer, absoluteAddress: number, payload: Buffer): Buffer {
+  const lines = source.toString("utf8").split(/\r?\n/).filter((line) => line && !line.startsWith(":00000001"));
+  lines.push(intelHexRecord(0, 4, Uint8Array.from([absoluteAddress >>> 24 & 0xff, absoluteAddress >>> 16 & 0xff])));
+  for (let offset = 0; offset < payload.byteLength; offset += 16) {
+    lines.push(intelHexRecord((absoluteAddress + offset) & 0xffff, 0, payload.subarray(offset, offset + 16)));
+  }
+  lines.push(":00000001FF");
+  return Buffer.from(`${lines.join("\n")}\n`);
+}
+
 test("Bearer API connection enforces scope, workspace and revocation", { skip: !databaseUrl }, async () => {
   process.env.DATABASE_URL = databaseUrl;
   process.env.BETTER_AUTH_SECRET ||= "test-secret-that-is-at-least-32-characters";
@@ -72,16 +88,18 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
 
     const templatesResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects/templates`, { headers });
     assert.equal(templatesResponse.status, 200);
-    const templatesBody = await templatesResponse.json() as { templates: Array<{ hardwareProfileId: string; adapterVersion: string; target: string }> };
+    const templatesBody = await templatesResponse.json() as { templates: Array<{ hardwareProfileId: string; adapterVersion: string; target: string; capabilityModules: Array<{ id: string; defaultEnabled: boolean }>; connectionModules: Array<{ id: string; defaultEnabled: boolean; required: boolean }> }> };
     const compactTemplate = templatesBody.templates.find((item) => item.target === "stm32f103c8");
     assert.ok(compactTemplate);
+    const selectedModuleIds = [...compactTemplate.capabilityModules, ...compactTemplate.connectionModules]
+      .filter((module) => module.defaultEnabled || module.required).map((module) => module.id);
     const hardwareProjectResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
-      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate }),
+      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate, selectedModuleIds }),
     });
     assert.equal(hardwareProjectResponse.status, 201);
     const hardwareProjectBody = await hardwareProjectResponse.json() as { hardwareProject: { id: string } };
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
-      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate }),
+      method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate, selectedModuleIds }),
     })).status, 409);
 
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, { headers })).status, 200);
@@ -136,7 +154,20 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal(firmwareContent.status, 200);
     assert.deepEqual(Buffer.from(await firmwareContent.arrayBuffer()), firmwareBytes);
 
-    const completeBytes = readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex");
+    const firmwareConfiguration = {
+      schemaVersion: 1 as const,
+      foundationModules: ["platform.boot-recovery", "platform.device-identity", "platform.debug-safety"],
+      capabilityModules: ["capability.motor-control", "capability.battery", "capability.tuning", "capability.telemetry"],
+      connectionModules: ["connection.swd", "connection.bluetooth"],
+      flashMethods: ["swd", "bluetooth"],
+    };
+    const configurationPayload = Buffer.from(`STMWEB_CONFIG:${JSON.stringify(firmwareConfiguration)}`);
+    const generatedApplicationBytes = Buffer.concat([firmwareBytes, configurationPayload, Buffer.from([0])]);
+    const completeBytes = embedHexPayload(
+      readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex"),
+      0x08001000 + firmwareBytes.byteLength,
+      Buffer.concat([configurationPayload, Buffer.from([0])]),
+    );
     const sourceBytes = Buffer.from("phase-b-source");
     const sourceSha256 = createHash("sha256").update(sourceBytes).digest("hex");
     const runner = await pool.query<{ id: string }>(
@@ -146,13 +177,13 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     );
     const job = await pool.query<{ id: string }>(
       `INSERT INTO build_jobs
-         (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,source_name,source_sha256,source_content,status,progress)
-       VALUES ($1,$2,$3,$4,'DOT 标准固件','stm32-cmake-gcc-v1','stm32f103c8','1','1','source.zip',$5,$6,'running',100) RETURNING id`,
-      [workspaces.rows[0].id, runner.rows[0].id, hardwareProjectBody.hardwareProject.id, user.rows[0].id, sourceSha256, sourceBytes],
+         (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,firmware_configuration,source_name,source_sha256,source_content,status,progress)
+       VALUES ($1,$2,$3,$4,'DOT 标准固件','stm32-cmake-gcc-v1','stm32f103c8','1','1',$5::jsonb,'source.zip',$6,$7,'running',100) RETURNING id`,
+      [workspaces.rows[0].id, runner.rows[0].id, hardwareProjectBody.hardwareProject.id, user.rows[0].id, JSON.stringify(firmwareConfiguration), sourceSha256, sourceBytes],
     );
     const generatedArtifacts = [
       { buildFile: "dot_v1_initial_swd.hex", role: "complete-image", format: "ihex", flashMethods: ["swd"], bytes: completeBytes, kind: "hex" },
-      { buildFile: "dot_v1.bin", role: "application", format: "bin", flashMethods: ["swd", "bluetooth"], bytes: firmwareBytes, kind: "bin" },
+      { buildFile: "dot_v1.bin", role: "application", format: "bin", flashMethods: ["swd", "bluetooth"], bytes: generatedApplicationBytes, kind: "bin" },
     ].map((item) => ({ ...item, size: item.bytes.byteLength, sha256: createHash("sha256").update(item.bytes).digest("hex") }));
     const generatedManifest = {
       schemaVersion: 1,
@@ -164,6 +195,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
       validation: { status: "verified", checks: ["vectors", "layout", "capacity", "factory-metadata", "sha256"] },
       source: { name: "source.zip", sha256: sourceSha256 },
       build: { profile: "stm32-cmake-gcc-v1", target: "stm32f103c8", environmentVersion: "test" },
+      composition: firmwareConfiguration,
     };
     for (const artifact of generatedArtifacts) {
       await pool.query(

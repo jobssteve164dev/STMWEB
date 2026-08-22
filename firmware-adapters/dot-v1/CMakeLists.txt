@@ -78,6 +78,9 @@ foreach(relative IN ITEMS
 endforeach()
 
 add_executable(dot_v1.elf ${DOT_SOURCES})
+if(DEFINED STMWEB_CONFIGURATION_SOURCE)
+  target_sources(dot_v1.elf PRIVATE "${STMWEB_CONFIGURATION_SOURCE}")
+endif()
 set_source_files_properties("${STMWEB_SOURCE_ROOT}/DOT_HARDWARE/DataScope_DP/DataScope_DP.C" PROPERTIES LANGUAGE C)
 
 if(STMWEB_INITIAL_SWD_FIRMWARE)

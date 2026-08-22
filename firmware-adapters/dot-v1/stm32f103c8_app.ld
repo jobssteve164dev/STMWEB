@@ -14,6 +14,7 @@ _Min_Stack_Size = 0x400;
 SECTIONS
 {
   .isr_vector : { KEEP(*(.isr_vector)) } > FLASH
+  .stmweb_config : { KEEP(*(.stmweb_config)) } > FLASH
   .text :
   {
     *(.text*) *(.rodata*)

@@ -9,7 +9,7 @@ import { digestRunnerSecret } from "./runner-auth.js";
 import { requireConnectionScope, requireConnectionWorkspace, requireUserOrApiConnection, type AuthenticatedApiRequest } from "./api-connection-auth.js";
 import { hasStmwebProAccess } from "./passport.js";
 import { prepareFirmwareUpload } from "./firmware-artifact.js";
-import { getFirmwareAdapterTarget, listFirmwareAdapterTargets } from "./firmware-adapter-registry.js";
+import { getFirmwareAdapterTarget, listFirmwareAdapterTargets, resolveFirmwareConfiguration } from "./firmware-adapter-registry.js";
 
 interface AuthenticatedRequest extends Request {
   currentUser: { id: string; username: string; name: string; email: string; passportUserId: string };
@@ -191,11 +191,18 @@ router.get("/workspaces/:workspaceId/hardware-projects", asyncRoute(async (reque
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id,name,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",
-            runtime_version AS "runtimeVersion",target,status,created_at AS "createdAt"
+            runtime_version AS "runtimeVersion",target,firmware_configuration AS "firmwareConfiguration",status,created_at AS "createdAt"
      FROM hardware_projects WHERE workspace_id=$1 AND status='active' ORDER BY created_at DESC`,
     [workspaceId],
   );
-  response.json({ hardwareProjects: result.rows });
+  response.json({ hardwareProjects: result.rows.map((project) => {
+    const registered = getFirmwareAdapterTarget(project.hardwareProfileId, project.adapterVersion, project.target);
+    const saved = project.firmwareConfiguration as { capabilityModules?: unknown; connectionModules?: unknown } | null;
+    const selected = saved && Array.isArray(saved.capabilityModules) && Array.isArray(saved.connectionModules)
+      ? [...saved.capabilityModules, ...saved.connectionModules].filter((item): item is string => typeof item === "string")
+      : undefined;
+    return { ...project, firmwareConfiguration: registered ? resolveFirmwareConfiguration(registered.adapter, registered.target, selected) : { schemaVersion: 1, foundationModules: [], capabilityModules: [], connectionModules: [], flashMethods: [] } };
+  }) });
 }));
 
 router.post("/workspaces/:workspaceId/hardware-projects", asyncRoute(async (request, response) => {
@@ -208,16 +215,20 @@ router.post("/workspaces/:workspaceId/hardware-projects", asyncRoute(async (requ
     hardwareProfileId: z.string().min(1).max(160),
     adapterVersion: z.string().min(1).max(40),
     target: z.string().min(1).max(80),
+    selectedModuleIds: z.array(z.string().min(1).max(120)).max(40),
   }).parse(request.body);
   const registered = getFirmwareAdapterTarget(input.hardwareProfileId, input.adapterVersion, input.target);
   if (!registered) { response.status(400).json({ error: "请选择平台已经验证的硬件模板" }); return; }
+  let firmwareConfiguration;
+  try { firmwareConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, input.selectedModuleIds); }
+  catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "固件模块配置不可用" }); return; }
   const result = await pool.query(
-    `INSERT INTO hardware_projects (workspace_id,created_by,name,hardware_profile_id,adapter_version,runtime_version,target)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO hardware_projects (workspace_id,created_by,name,hardware_profile_id,adapter_version,runtime_version,target,firmware_configuration)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
      ON CONFLICT (workspace_id,name) DO NOTHING
      RETURNING id,name,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",
-       runtime_version AS "runtimeVersion",target,status,created_at AS "createdAt"`,
-    [workspaceId, user.id, input.name, registered.adapter.adapterId, registered.adapter.adapterVersion, registered.adapter.runtimeVersion, registered.target.id],
+       runtime_version AS "runtimeVersion",target,firmware_configuration AS "firmwareConfiguration",status,created_at AS "createdAt"`,
+    [workspaceId, user.id, input.name, registered.adapter.adapterId, registered.adapter.adapterVersion, registered.adapter.runtimeVersion, registered.target.id, JSON.stringify(firmwareConfiguration)],
   );
   if (!result.rows[0]) { response.status(409).json({ error: "这个硬件项目名称已经存在" }); return; }
   response.status(201).json({ hardwareProject: result.rows[0] });
@@ -517,7 +528,7 @@ router.get("/workspaces/:workspaceId/builds", asyncRoute(async (request, respons
     `SELECT j.id,j.runner_id AS "runnerId",r.name AS "runnerName",j.name,j.profile,j.target,j.source_name AS "sourceName",
        h.id AS "hardwareProjectId",h.name AS "hardwareProjectName",p.id AS "packageId",p.status AS "packageStatus",
        j.source_sha256 AS "sourceSha256",j.status,j.progress,j.error,j.created_at AS "createdAt",j.started_at AS "startedAt",j.finished_at AS "finishedAt",
-       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size,'artifactRole',(SELECT pa.artifact_role FROM firmware_package_artifacts pa WHERE pa.package_id=p.id AND pa.file_name=a.name LIMIT 1)) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
      FROM build_jobs j JOIN build_runners r ON r.id=j.runner_id
        LEFT JOIN hardware_projects h ON h.id=j.hardware_project_id LEFT JOIN firmware_packages p ON p.build_job_id=j.id
      WHERE j.workspace_id=$1 ORDER BY j.created_at DESC LIMIT 100`,
@@ -536,7 +547,7 @@ router.get("/workspaces/:workspaceId/builds/:jobId", asyncRoute(async (request, 
     `SELECT j.id,j.runner_id AS "runnerId",r.name AS "runnerName",j.name,j.profile,j.target,j.source_name AS "sourceName",
        h.id AS "hardwareProjectId",h.name AS "hardwareProjectName",p.id AS "packageId",p.status AS "packageStatus",
        j.source_sha256 AS "sourceSha256",j.status,j.progress,j.error,j.created_at AS "createdAt",j.started_at AS "startedAt",j.finished_at AS "finishedAt",
-       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'kind',a.kind,'sha256',a.sha256,'size',a.size,'artifactRole',(SELECT pa.artifact_role FROM firmware_package_artifacts pa WHERE pa.package_id=p.id AND pa.file_name=a.name LIMIT 1)) ORDER BY a.created_at) FROM build_artifacts a WHERE a.job_id=j.id),'[]'::jsonb) AS artifacts
      FROM build_jobs j JOIN build_runners r ON r.id=j.runner_id
        LEFT JOIN hardware_projects h ON h.id=j.hardware_project_id LEFT JOIN firmware_packages p ON p.build_job_id=j.id
      WHERE j.id=$1 AND j.workspace_id=$2`,
@@ -560,14 +571,16 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
     target: z.enum(["stm32f103c8", "stm32f103cb"]).optional(),
   }).refine((value) => value.hardwareProjectId || value.target, { message: "请选择硬件项目" }).parse(request.body);
   const runner = await pool.query(
-    `SELECT id FROM build_runners WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'`,
+    `SELECT id FROM build_runners
+     WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'
+       AND capabilities->>'firmwareCompositionVersion'='1'`,
     [input.runnerId,workspaceId],
   );
-  if (!runner.rowCount) { response.status(409).json({ error: "请选择在线的编译算力" }); return; }
+  if (!runner.rowCount) { response.status(409).json({ error: "请选择已更新且在线的编译算力" }); return; }
   let hardwareProject = input.hardwareProjectId ? (await pool.query<{
-    id: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string;
+    id: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string; firmwareConfiguration: unknown;
   }>(
-    `SELECT id,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",runtime_version AS "runtimeVersion",target
+    `SELECT id,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",runtime_version AS "runtimeVersion",target,firmware_configuration AS "firmwareConfiguration"
      FROM hardware_projects WHERE id=$1 AND workspace_id=$2 AND status='active'`,
     [input.hardwareProjectId, workspaceId],
   )).rows[0] : undefined;
@@ -575,12 +588,12 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
     const template = getFirmwareAdapterTarget("stmweb.dot-v1", "1", input.target);
     if (!template) { response.status(400).json({ error: "目标硬件尚未完成平台适配" }); return; }
     const created = await pool.query<{
-      id: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string;
+      id: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string; firmwareConfiguration: unknown;
     }>(
       `INSERT INTO hardware_projects (workspace_id,created_by,name,hardware_profile_id,adapter_version,runtime_version,target)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (workspace_id,name) DO UPDATE SET updated_at=now()
-       RETURNING id,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",runtime_version AS "runtimeVersion",target`,
+       RETURNING id,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",runtime_version AS "runtimeVersion",target,firmware_configuration AS "firmwareConfiguration"`,
       [workspaceId, user.id, `${template.adapter.label} · ${template.target.label}`, template.adapter.adapterId,
         template.adapter.adapterVersion, template.adapter.runtimeVersion, template.target.id],
     );
@@ -591,13 +604,20 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   if (!registered || registered.adapter.runtimeVersion !== hardwareProject.runtimeVersion || registered.adapter.buildProfile !== input.profile) {
     response.status(409).json({ error: "硬件项目使用的适配版本当前不可生成" }); return;
   }
+  const savedConfiguration = hardwareProject.firmwareConfiguration as { capabilityModules?: unknown; connectionModules?: unknown } | null;
+  const selectedModuleIds = savedConfiguration && Array.isArray(savedConfiguration.capabilityModules) && Array.isArray(savedConfiguration.connectionModules)
+    ? [...savedConfiguration.capabilityModules, ...savedConfiguration.connectionModules].filter((item): item is string => typeof item === "string")
+    : undefined;
+  let firmwareConfiguration;
+  try { firmwareConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, selectedModuleIds); }
+  catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : "硬件项目的固件配置已不可用" }); return; }
   const sha256 = createHash("sha256").update(request.file.buffer).digest("hex");
   const result = await pool.query<{ id: string }>(
     `INSERT INTO build_jobs
-       (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,source_name,source_sha256,source_content)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+       (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,firmware_configuration,source_name,source_sha256,source_content)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13) RETURNING id`,
     [workspaceId,input.runnerId,hardwareProject.id,user.id,input.name,input.profile,hardwareProject.target,
-      hardwareProject.adapterVersion,hardwareProject.runtimeVersion,request.file.originalname,sha256,request.file.buffer],
+      hardwareProject.adapterVersion,hardwareProject.runtimeVersion,JSON.stringify(firmwareConfiguration),request.file.originalname,sha256,request.file.buffer],
   );
   response.status(201).json({ id: result.rows[0].id, sha256 });
 }));

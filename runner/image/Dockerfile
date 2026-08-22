@@ -8,5 +8,5 @@ RUN apt-get update \
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /source
-COPY firmware-adapters/dot-v1 /opt/stmweb/adapters/dot-v1
+COPY firmware-adapters /opt/stmweb/adapters
 CMD ["sh"]

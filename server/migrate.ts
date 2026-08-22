@@ -76,10 +76,12 @@ CREATE TABLE IF NOT EXISTS hardware_projects (
   adapter_version text NOT NULL,
   runtime_version text NOT NULL,
   target text NOT NULL,
+  firmware_configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (workspace_id, name)
+  UNIQUE (workspace_id, name),
+  CHECK (jsonb_typeof(firmware_configuration) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS hardware_projects_workspace_idx ON hardware_projects(workspace_id, created_at DESC);
@@ -236,6 +238,7 @@ CREATE TABLE IF NOT EXISTS build_jobs (
   target text NOT NULL,
   adapter_version text,
   runtime_version text,
+  firmware_configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
   source_name text NOT NULL,
   source_sha256 text NOT NULL CHECK (length(source_sha256) = 64),
   source_content bytea NOT NULL,
@@ -248,7 +251,8 @@ CREATE TABLE IF NOT EXISTS build_jobs (
   finished_at timestamptz,
   error text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(firmware_configuration) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS build_jobs_workspace_idx ON build_jobs(workspace_id, created_at DESC);
@@ -257,6 +261,8 @@ CREATE INDEX IF NOT EXISTS build_jobs_runner_queue_idx ON build_jobs(runner_id, 
 ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS hardware_project_id uuid REFERENCES hardware_projects(id) ON DELETE RESTRICT;
 ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS adapter_version text;
 ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS runtime_version text;
+ALTER TABLE hardware_projects ADD COLUMN IF NOT EXISTS firmware_configuration jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS firmware_configuration jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 ALTER TABLE build_runners DROP CONSTRAINT IF EXISTS build_runners_current_job_id_fkey;
 ALTER TABLE build_runners ADD CONSTRAINT build_runners_current_job_id_fkey

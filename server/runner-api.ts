@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pool, withTransaction } from "./database.js";
 import { digestRunnerSecret, requireRunner, type RunnerRequest } from "./runner-auth.js";
 import { registerGeneratedFirmwarePackage } from "./firmware-package-registration.js";
+import { getFirmwareAdapterTarget } from "./firmware-adapter-registry.js";
 
 const router = express.Router();
 const capabilitiesSchema = z.object({
@@ -12,6 +13,7 @@ const capabilitiesSchema = z.object({
   backend: z.string().max(64),
   environmentVersion: z.string().max(120),
   maxConcurrentBuilds: z.number().int().min(1).max(4).default(1),
+  firmwareCompositionVersion: z.literal(1).optional(),
   toolchains: z.array(z.object({ id: z.string().max(80), version: z.string().max(80), targets: z.array(z.string().max(80)).max(32) })).max(16),
   diskFreeMb: z.number().int().min(0).optional(),
 });
@@ -81,20 +83,26 @@ router.post("/jobs/lease", asyncRoute(async (request, response) => {
   const lease = await withTransaction(async (client) => {
     const active = await client.query(`SELECT id FROM build_jobs WHERE runner_id=$1 AND status IN ('leased','running') LIMIT 1`, [runner.id]);
     if (active.rowCount) return null;
-    const queued = await client.query<{ id: string; name: string; profile: string; target: string; sourceName: string; sourceSha256: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string }>(
+    const queued = await client.query<{ id: string; name: string; profile: string; target: string; sourceName: string; sourceSha256: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; firmwareConfiguration: unknown }>(
       `SELECT j.id,j.name,j.profile,j.target,j.source_name AS "sourceName",j.source_sha256 AS "sourceSha256",
-              p.hardware_profile_id AS "hardwareProfileId",j.adapter_version AS "adapterVersion",j.runtime_version AS "runtimeVersion"
+              p.hardware_profile_id AS "hardwareProfileId",j.adapter_version AS "adapterVersion",j.runtime_version AS "runtimeVersion",
+              j.firmware_configuration AS "firmwareConfiguration"
        FROM build_jobs j JOIN hardware_projects p ON p.id=j.hardware_project_id
        WHERE j.runner_id=$1 AND j.status='queued' AND j.desired_state='running'
+         AND EXISTS (SELECT 1 FROM build_runners r WHERE r.id=$1 AND r.capabilities->>'firmwareCompositionVersion'='1')
        ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,
       [runner.id],
     );
     const job = queued.rows[0];
     if (!job) return null;
+    const registered = getFirmwareAdapterTarget(job.hardwareProfileId, job.adapterVersion, job.target);
+    if (!registered || registered.adapter.runtimeVersion !== job.runtimeVersion || registered.adapter.buildProfile !== job.profile) {
+      throw new Error("排队任务引用的固件适配器已经不可用");
+    }
     const leaseId = randomUUID();
     await client.query(`UPDATE build_jobs SET status='leased', lease_id=$2, leased_at=now(), updated_at=now() WHERE id=$1`, [job.id, leaseId]);
     await client.query(`UPDATE build_runners SET current_job_id=$2, status='busy', last_seen_at=now() WHERE id=$1`, [runner.id, job.id]);
-    return { ...job, leaseId, sourceUrl: `/api/runner/jobs/${job.id}/source` };
+    return { ...job, adapterBuildDirectory: registered.adapter.buildDirectory, leaseId, sourceUrl: `/api/runner/jobs/${job.id}/source` };
   });
   response.json({ job: lease });
 }));

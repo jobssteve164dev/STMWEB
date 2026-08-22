@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { inspectFirmwareArtifact, prepareFirmwareUpload } from "../server/firmware-artifact.js";
+import { getFirmwareAdapterTarget } from "../server/firmware-adapter-registry.js";
+import { firmwareContainsPayload, inspectFirmwareArtifact, prepareFirmwareUpload } from "../server/firmware-artifact.js";
 
 const cases = [
   ["dot_v1_compact_initial_swd.hex", "complete-image", 64 * 1024, ["swd"]],
@@ -36,4 +37,24 @@ test("computes the stored digest from server-received bytes", () => {
   const expected = createHash("sha256").update(content).digest("hex");
   assert.equal(prepareFirmwareUpload(content, "firmware.bin").sha256, expected);
   assert.throws(() => prepareFirmwareUpload(content, "firmware.bin", "0".repeat(64)), /实际文件内容不一致/);
+});
+
+test("finds an embedded configuration payload in application and complete images", () => {
+  const registered = getFirmwareAdapterTarget("stmweb.dot-v1", "1", "stm32f103c8");
+  assert.ok(registered);
+  const payload = new TextEncoder().encode("STMWEB_CONFIG:test");
+  const application = Buffer.concat([
+    readFileSync("public/firmware/dot-v1/dot_v1_compact_application.bin"),
+    payload,
+  ]);
+  assert.equal(firmwareContainsPayload(application, "application.bin", registered.target, payload), true);
+
+  const source = readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex", "utf8");
+  const data = [...payload];
+  const address = 0xf000;
+  const sum = data.reduce((total, value) => total + value, data.length + (address >> 8) + (address & 0xff));
+  const checksum = (-sum) & 0xff;
+  const record = `:${data.length.toString(16).padStart(2, "0")}${address.toString(16).padStart(4, "0")}00${Buffer.from(data).toString("hex")}${checksum.toString(16).padStart(2, "0")}`.toUpperCase();
+  const complete = new TextEncoder().encode(source.replace(":00000001FF", `${record}\n:00000001FF`));
+  assert.equal(firmwareContainsPayload(complete, "complete.hex", registered.target, payload), true);
 });

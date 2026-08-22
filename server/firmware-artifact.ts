@@ -72,7 +72,7 @@ function decodeHexRecord(line: string, lineNumber: number): Uint8Array {
   return record;
 }
 
-function parseDotCompleteImage(source: string, target: FirmwareAdapterTarget): boolean {
+function parseDotCompleteImage(source: string, target: FirmwareAdapterTarget): Uint8Array | null {
   const image = new Uint8Array(target.flashSize).fill(0xff);
   let upperAddress = 0;
   let eof = false;
@@ -84,12 +84,12 @@ function parseDotCompleteImage(source: string, target: FirmwareAdapterTarget): b
     const type = record[3];
     if (type === 0) {
       const absolute = upperAddress + address;
-      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + target.flashSize) return false;
+      if (absolute < STM32_FLASH_BASE || absolute + record[0] > STM32_FLASH_BASE + target.flashSize) return null;
       image.set(record.subarray(4, 4 + record[0]), absolute - STM32_FLASH_BASE);
     } else if (type === 1) {
       eof = true;
     } else if (type === 4) {
-      if (record[0] !== 2) return false;
+      if (record[0] !== 2) return null;
       upperAddress = (record[4] << 8 | record[5]) << 16;
     }
   }
@@ -99,7 +99,7 @@ function parseDotCompleteImage(source: string, target: FirmwareAdapterTarget): b
   return vectorsMatch(image, 0, STM32_FLASH_BASE, target.applicationBase)
     && vectorsMatch(image, appOffset, target.applicationBase, target.applicationLimit)
     && readU32(image, metadataOffset) === DOT_FACTORY_MAGIC
-    && readU32(image, metadataOffset + 12) === DOT_FACTORY_CHECK;
+    && readU32(image, metadataOffset + 12) === DOT_FACTORY_CHECK ? image : null;
 }
 
 function inspectDotCompleteImage(content: Uint8Array, candidates = registeredTargets): FirmwareArtifactDescriptor | null {
@@ -154,4 +154,20 @@ export function prepareFirmwareUpload(content: Uint8Array, fileName: string, cli
   const sha256 = createHash("sha256").update(content).digest("hex");
   if (clientSha256 && clientSha256 !== sha256) throw new Error("固件摘要与实际文件内容不一致");
   return { ...inspectFirmwareArtifact(content, fileName), sha256 };
+}
+
+function containsBytes(source: Uint8Array, expected: Uint8Array): boolean {
+  if (!expected.byteLength || expected.byteLength > source.byteLength) return false;
+  outer: for (let start = 0; start <= source.byteLength - expected.byteLength; start++) {
+    for (let index = 0; index < expected.byteLength; index++) if (source[start + index] !== expected[index]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+export function firmwareContainsPayload(content: Uint8Array, fileName: string, target: FirmwareAdapterTarget, payload: Uint8Array): boolean {
+  if (content[0] !== 0x3a && !fileName.toLowerCase().endsWith(".hex")) return containsBytes(content, payload);
+  const source = new TextDecoder("utf-8", { fatal: true }).decode(content);
+  const image = parseDotCompleteImage(source, target);
+  return image ? containsBytes(image, payload) : false;
 }

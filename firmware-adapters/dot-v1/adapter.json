@@ -5,10 +5,84 @@
   "runtimeVersion": "1",
   "label": "DOT V1",
   "buildProfile": "stm32-cmake-gcc-v1",
+  "buildDirectory": "dot-v1",
   "runtime": {
     "debugProtocol": "1",
     "bootProtocol": "1",
     "transports": ["swd", "bluetooth-uart"]
+  },
+  "modules": {
+    "foundation": [
+      {
+        "id": "platform.boot-recovery",
+        "kind": "foundation",
+        "label": { "zh": "启动与恢复", "en": "Boot & recovery" },
+        "description": { "zh": "自动提供可靠启动、升级入口和失败恢复。", "en": "Provides reliable boot, update entry and failure recovery." }
+      },
+      {
+        "id": "platform.device-identity",
+        "kind": "foundation",
+        "label": { "zh": "设备身份", "en": "Device identity" },
+        "description": { "zh": "写入硬件适配与固件身份，供连接和烧录时自动核对。", "en": "Embeds hardware and firmware identity for automatic connection and flashing checks." }
+      },
+      {
+        "id": "platform.debug-safety",
+        "kind": "foundation",
+        "label": { "zh": "调试与安全", "en": "Debug & safety" },
+        "description": { "zh": "提供能力发现、安全停止、完整性校验和重启确认。", "en": "Provides capability discovery, safe stop, integrity checks and restart confirmation." }
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "capability.motor-control",
+        "kind": "capability",
+        "label": { "zh": "电机控制", "en": "Motor control" },
+        "description": { "zh": "控制双电机输出并读取运行状态。", "en": "Controls dual motor output and reads its live state." },
+        "defaultEnabled": true
+      },
+      {
+        "id": "capability.battery",
+        "kind": "capability",
+        "label": { "zh": "电池状态", "en": "Battery status" },
+        "description": { "zh": "读取电池电压并提供低电量状态。", "en": "Reads battery voltage and exposes low-power state." },
+        "defaultEnabled": true
+      },
+      {
+        "id": "capability.tuning",
+        "kind": "capability",
+        "label": { "zh": "参数调节", "en": "Parameter tuning" },
+        "description": { "zh": "在调试台调整平衡与速度参数。", "en": "Tunes balance and speed parameters from the workbench." },
+        "defaultEnabled": true,
+        "requires": ["capability.motor-control"]
+      },
+      {
+        "id": "capability.telemetry",
+        "kind": "capability",
+        "label": { "zh": "实时遥测", "en": "Live telemetry" },
+        "description": { "zh": "连续查看电机、电池和控制数据曲线。", "en": "Streams motor, battery and control data charts." },
+        "defaultEnabled": true
+      }
+    ],
+    "connections": [
+      {
+        "id": "connection.swd",
+        "kind": "connection",
+        "label": { "zh": "SWD 有线烧录", "en": "SWD wired flashing" },
+        "description": { "zh": "用于安装、更新和恢复，始终保留。", "en": "Always available for installation, updates and recovery." },
+        "defaultEnabled": true,
+        "required": true,
+        "flashMethod": "swd"
+      },
+      {
+        "id": "connection.bluetooth",
+        "kind": "connection",
+        "label": { "zh": "蓝牙应用升级", "en": "Bluetooth app updates" },
+        "description": { "zh": "保留 Bootloader，通过近距离蓝牙更新应用。", "en": "Keeps the Bootloader and updates the application over nearby Bluetooth." },
+        "defaultEnabled": true,
+        "required": false,
+        "flashMethod": "bluetooth"
+      }
+    ]
   },
   "targets": [
     {

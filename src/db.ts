@@ -71,6 +71,7 @@ export interface BuildRunnerRecord {
     architecture?: string;
     backend?: string;
     environmentVersion?: string;
+    firmwareCompositionVersion?: number;
     toolchains?: Array<{ id: string; version: string; targets: string[] }>;
   };
   currentJobId?: string;
@@ -83,6 +84,27 @@ export interface BuildArtifactRecord {
   kind: string;
   sha256: string;
   size: number;
+  artifactRole?: "complete-image" | "application" | null;
+}
+
+export interface FirmwareConfiguration {
+  schemaVersion: 1;
+  foundationModules: string[];
+  capabilityModules: string[];
+  connectionModules: string[];
+  flashMethods: Array<"swd" | "bluetooth">;
+}
+
+export interface FirmwareModuleRecord {
+  id: string;
+  kind: "foundation" | "capability" | "connection";
+  label: { zh: string; en: string };
+  description: { zh: string; en: string };
+  requires: string[];
+  conflicts: string[];
+  defaultEnabled?: boolean;
+  required?: boolean;
+  flashMethod?: "swd" | "bluetooth";
 }
 
 export interface BuildJobRecord {
@@ -92,6 +114,7 @@ export interface BuildJobRecord {
   name: string;
   profile: string;
   target: string;
+  firmwareConfiguration?: FirmwareConfiguration;
   hardwareProjectId?: string;
   hardwareProjectName?: string;
   packageId?: string;
@@ -112,6 +135,7 @@ export interface HardwareProjectRecord {
   adapterVersion: string;
   runtimeVersion: string;
   target: string;
+  firmwareConfiguration: FirmwareConfiguration;
   status: "active" | "retired";
   createdAt: string;
 }
@@ -126,6 +150,9 @@ export interface HardwareTemplateRecord {
   targetLabel: string;
   flashSize: number;
   flashMethods: Array<"swd" | "bluetooth">;
+  foundationModules: FirmwareModuleRecord[];
+  capabilityModules: FirmwareModuleRecord[];
+  connectionModules: FirmwareModuleRecord[];
 }
 
 let activeWorkspaceId = "";
@@ -255,7 +282,7 @@ export async function listHardwareTemplates(): Promise<HardwareTemplateRecord[]>
   return result.templates;
 }
 
-export async function createHardwareProject(input: { name: string; template: HardwareTemplateRecord }): Promise<HardwareProjectRecord> {
+export async function createHardwareProject(input: { name: string; template: HardwareTemplateRecord; selectedModuleIds: string[] }): Promise<HardwareProjectRecord> {
   const result = await requestJson<{ hardwareProject: HardwareProjectRecord }>(`/api/workspaces/${workspaceId()}/hardware-projects`, {
     method: "POST",
     body: JSON.stringify({
@@ -263,6 +290,7 @@ export async function createHardwareProject(input: { name: string; template: Har
       hardwareProfileId: input.template.hardwareProfileId,
       adapterVersion: input.template.adapterVersion,
       target: input.template.target,
+      selectedModuleIds: input.selectedModuleIds,
     }),
   });
   return result.hardwareProject;

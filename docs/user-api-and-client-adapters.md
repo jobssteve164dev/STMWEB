@@ -91,7 +91,7 @@ CloudMCP 还应在自身审计中关联 connector 与 workspace，但这些信�
 ### 5.3 建议 scopes
 
 - `devices:read`
-- `devices:connect`
+- `devices:manage`
 - `devices:control`
 - `debug:read`
 - `debug:execute`

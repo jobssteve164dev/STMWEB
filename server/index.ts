@@ -11,6 +11,7 @@ import { runnerApiRouter } from "./runner-api.js";
 import { billingApiRouter } from "./billing-api.js";
 import { apiConnectionsRouter } from "./api-connection-auth.js";
 import { legalApiRouter } from "./legal-api.js";
+import { deviceApiRouter, deviceGatewayErrorHandler, deviceGatewayRouter } from "./device-gateway.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,14 +31,20 @@ app.get("/install-runner.sh", (_request, response) => {
 app.get("/runner/stmweb-runner.mjs", (_request, response) => {
   response.type("text/javascript").sendFile(path.join(root, "runner", "stmweb-runner.mjs"));
 });
+app.get("/device/stmweb-device-provider.mjs", (_request, response) => {
+  response.type("text/javascript").sendFile(path.join(root, "scripts", "stmweb-device-provider.mjs"));
+});
 
 app.use("/api/internal-auth", internalAuthRouter);
 app.use("/api/billing", billingApiRouter);
 app.use("/api/legal", legalApiRouter);
 app.use("/api/provider-bridge", cloudmcpProviderRouter);
 app.use("/api/runner", runnerApiRouter);
+app.use("/api/device/v1", deviceApiRouter, deviceGatewayErrorHandler);
 app.use("/api/api-connections", apiConnectionsRouter);
+app.use("/api/v1", deviceGatewayRouter, deviceGatewayErrorHandler);
 app.use("/api/v1", apiRouter);
+app.use("/api", deviceGatewayRouter, deviceGatewayErrorHandler);
 app.use("/api", apiRouter);
 app.use("/api", (error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   console.error("[STMWEB] API request failed", error);

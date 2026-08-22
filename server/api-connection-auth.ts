@@ -8,7 +8,7 @@ import { getAuthenticatedUser, type InternalUser } from "./internal-auth.js";
 import { hasStmwebProAccess } from "./passport.js";
 
 export const API_SCOPES = [
-  "devices:read", "devices:control", "debug:read", "debug:execute",
+  "devices:read", "devices:manage", "devices:control", "debug:read", "debug:execute",
   "runners:read", "runners:manage", "builds:read", "builds:create", "builds:cancel", "artifacts:read",
 ] as const;
 export type ApiScope = typeof API_SCOPES[number];
@@ -64,7 +64,12 @@ export async function resolveApiConnectionCredential(credential: string): Promis
 }
 
 export function requiredApiScope(method: string, path: string): ApiScope | null {
-  if (/\/devices$/.test(path)) return method === "GET" ? "devices:read" : "devices:control";
+  if (/\/device-enrollments$/.test(path) || /\/device-providers\/[^/]+\/revoke$/.test(path)) return "devices:manage";
+  if (/\/device-grants(?:\/|$)/.test(path)) return method === "GET" ? "devices:read" : "devices:manage";
+  if (/\/devices\/[^/]+\/operations$/.test(path)) return method === "GET" ? "devices:read" : "devices:control";
+  if (/\/device-operations\/[^/]+\/cancel$/.test(path)) return "devices:control";
+  if (/\/device-operations(?:\/|$)/.test(path) || /\/devices\/[^/]+(?:\/capabilities)?$/.test(path) || /\/gateway$/.test(path)) return "devices:read";
+  if (/\/devices$/.test(path)) return method === "GET" ? "devices:read" : "devices:manage";
   if (/\/hardware-projects(?:\/templates)?$/.test(path)) return method === "GET" ? "builds:read" : "builds:create";
   if (/\/firmware-packages\/[^/]+\/stable$/.test(path)) return "builds:create";
   if (/\/firmware(?:\/[^/]+\/content)?$/.test(path)) return method === "GET" ? "artifacts:read" : "builds:create";
@@ -135,6 +140,7 @@ export function requireConnectionWorkspace(request: Request, workspaceId: string
 }
 
 const connectionInput = z.object({
+  workspaceId: z.string().uuid(),
   name: z.string().trim().min(1).max(120),
   purpose: z.string().trim().min(1).max(500),
   scopes: z.array(z.enum(API_SCOPES)).min(1).max(API_SCOPES.length).transform((items) => [...new Set(items)]),
@@ -171,16 +177,17 @@ apiConnectionsRouter.use(async (request, response, next) => {
 apiConnectionsRouter.get("/", async (request, response, next) => {
   try {
     const user = (request as unknown as AuthenticatedApiRequest).currentUser;
+    const workspaceId = request.query.workspaceId ? z.string().uuid().parse(request.query.workspaceId) : null;
     const result = await pool.query(
       `SELECT c.id,c.name,c.purpose,c.scopes,c.credential_hint AS "credentialHint",c.status,
          c.created_at AS "createdAt",c.rotated_at AS "rotatedAt",c.last_used_at AS "lastUsedAt",c.revoked_at AS "revokedAt"
        FROM api_connections c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id
-       WHERE c.user_id=$1 AND wm.user_id=$1 ORDER BY c.created_at DESC`, [user.id],
+       WHERE c.user_id=$1 AND wm.user_id=$1 AND ($2::uuid IS NULL OR c.workspace_id=$2) ORDER BY c.created_at DESC`, [user.id, workspaceId],
     );
     const activity = await pool.query(
       `SELECT a.id,a.connection_id AS "connectionId",a.action,a.outcome,a.occurred_at AS "occurredAt"
        FROM api_audit_events a JOIN api_connections c ON c.id=a.connection_id
-       WHERE c.user_id=$1 ORDER BY a.occurred_at DESC LIMIT 50`, [user.id],
+       WHERE c.user_id=$1 AND ($2::uuid IS NULL OR c.workspace_id=$2) ORDER BY a.occurred_at DESC LIMIT 50`, [user.id, workspaceId],
     );
     response.json({ connections: result.rows.map(connectionView), recentActivity: activity.rows });
   } catch (error) { next(error); }
@@ -191,7 +198,7 @@ apiConnectionsRouter.post("/", async (request, response, next) => {
     const user = (request as unknown as AuthenticatedApiRequest).currentUser;
     const input = connectionInput.parse(request.body);
     const workspace = await pool.query<{ id: string }>(
-      `SELECT workspace_id AS id FROM workspace_members WHERE user_id=$1 AND role IN ('owner','editor') ORDER BY created_at LIMIT 1`, [user.id],
+      `SELECT workspace_id AS id FROM workspace_members WHERE user_id=$1 AND workspace_id=$2 AND role IN ('owner','editor')`, [user.id, input.workspaceId],
     );
     if (!workspace.rows[0]) return response.status(403).json({ error: "当前账户没有可授权的工作区" });
     const issued = issueCredential();

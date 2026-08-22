@@ -22,6 +22,7 @@ import {
   Play,
   Plug,
   Radio,
+  RadioTower,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -80,8 +81,9 @@ import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
 import { SwdFlashPanel } from "./InitialSwdFlashPanel.js";
 import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
 import { useLocale } from "./i18n.js";
+import { HardwareGatewayPanel } from "./HardwareGatewayPanel.js";
 
-type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
+type ViewId = "console" | "devices" | "gateway" | "firmware" | "sessions" | "settings";
 
 interface ConnectionInfo {
   name: string;
@@ -112,6 +114,7 @@ interface AppProps {
 const navigation: Array<{ id: ViewId; zh: string; en: string; icon: LucideIcon }> = [
   { id: "console", zh: "调试台", en: "Workbench", icon: LayoutDashboard },
   { id: "devices", zh: "设备台账", en: "Devices", icon: Cpu },
+  { id: "gateway", zh: "硬件网关", en: "Gateway", icon: RadioTower },
   { id: "firmware", zh: "固件管理", en: "Firmware Management", icon: Box },
   { id: "sessions", zh: "会话记录", en: "Sessions", icon: History },
   { id: "settings", zh: "设置", en: "Settings", icon: Settings },
@@ -703,7 +706,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
       <div className="workspace">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>{workspace.name}</span><span>/</span><strong>{selectedDevice.name}</strong>
+            <span>{workspace.name}</span><span>/</span><strong>{activeView === "gateway" ? c("硬件网关", "Hardware Gateway") : selectedDevice.name}</strong>
           </div>
           <div className="topbar-status">
             <span className="environment-badge"><span />{c("数据已同步", "Data synced")}</span>
@@ -841,6 +844,8 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
             </section>
           ) : null}
 
+          {activeView === "gateway" ? <HardwareGatewayPanel workspaceId={workspace.id} onOpenSettings={() => setActiveView("settings")} /> : null}
+
           {activeView === "firmware" ? (
             <section className="page-section" aria-labelledby="firmware-heading">
               <div className="page-heading"><div><span className="panel-kicker">{c("版本化管理", "Versioned management")}</span><h1 id="firmware-heading">{c("固件管理", "Firmware Management")}</h1><p>{c("安装、升级和管理工作区中的固件。", "Install, update and manage firmware in this workspace.")}</p></div><button className="primary-button" type="button" disabled={fileBusy} onClick={() => fileInputRef.current?.click()}>{fileBusy ? <Loader2 size={17} className="spinning" /> : <Upload size={17} />}{fileBusy ? c("正在校验", "Verifying…") : c("导入固件", "Import Firmware")}</button></div>
@@ -883,7 +888,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               )}
             </section>
           ) : null}
-          {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} proAccess={planAccess.pro} /> : null}
+          {activeView === "settings" ? <ApiConnectionsSettings accountEmail={user.email || user.username} proAccess={planAccess.pro} workspaceId={workspace.id} /> : null}
           </div>
         </main>
       </div>

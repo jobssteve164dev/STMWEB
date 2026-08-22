@@ -20,6 +20,7 @@ COPY --from=build /app/dist-server ./dist-server
 COPY firmware-adapters ./firmware-adapters
 COPY deploy ./deploy
 COPY runner/stmweb-runner.mjs runner/install-runner.sh ./runner/
+COPY scripts/stmweb-device-provider.mjs ./scripts/
 RUN chmod +x /app/deploy/database-migrate
 
 EXPOSE 8080

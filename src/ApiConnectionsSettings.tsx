@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocale } from "./i18n.js";
 
 type ApiScope = "devices:read" | "devices:control" | "debug:read" | "debug:execute" |
-  "runners:read" | "runners:manage" | "builds:read" | "builds:create" | "builds:cancel" | "artifacts:read";
+  "devices:manage" | "runners:read" | "runners:manage" | "builds:read" | "builds:create" | "builds:cancel" | "artifacts:read";
 
 interface ApiConnection {
   id: string;
@@ -28,7 +28,8 @@ interface ApiActivity {
 
 const scopeGroups: Array<{ id: ApiScope; zh: string; en: string }> = [
   { id: "devices:read", zh: "查看设备", en: "View devices" },
-  { id: "devices:control", zh: "登记设备", en: "Register devices" },
+  { id: "devices:manage", zh: "注册和授权设备", en: "Register and authorise devices" },
+  { id: "devices:control", zh: "调用设备", en: "Call devices" },
   { id: "debug:read", zh: "查看调试记录", en: "View debugging records" },
   { id: "debug:execute", zh: "写入调试记录", en: "Write debugging records" },
   { id: "runners:read", zh: "查看编译算力", en: "View build runners" },
@@ -51,7 +52,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEmail: string; proAccess: boolean }) {
+export function ApiConnectionsSettings({ accountEmail, proAccess, workspaceId }: { accountEmail: string; proAccess: boolean; workspaceId: string }) {
   const { isEnglish, locale } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
   const [connections, setConnections] = useState<ApiConnection[]>([]);
@@ -62,10 +63,10 @@ export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEma
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const result = await request<{ connections: ApiConnection[]; recentActivity: ApiActivity[] }>("/");
+    const result = await request<{ connections: ApiConnection[]; recentActivity: ApiActivity[] }>(`/?workspaceId=${encodeURIComponent(workspaceId)}`);
     setConnections(result.connections);
     setActivity(result.recentActivity);
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (proAccess) void load().catch((reason) => setError(reason instanceof Error ? reason.message : c("API 连接暂时无法读取", "API connections are temporarily unavailable")));
@@ -95,7 +96,7 @@ export function ApiConnectionsSettings({ accountEmail, proAccess }: { accountEma
         const data = new FormData(formElement);
         const scopes = scopeGroups.filter(({ id }) => data.get(id) === "on").map(({ id }) => id);
         void perform(async () => {
-          const result = await request<{ credential: string }>("/", { method: "POST", body: JSON.stringify({ name: data.get("name"), purpose: data.get("purpose"), scopes }) });
+          const result = await request<{ credential: string }>("/", { method: "POST", body: JSON.stringify({ workspaceId, name: data.get("name"), purpose: data.get("purpose"), scopes }) });
           formElement.reset();
           return result;
         });

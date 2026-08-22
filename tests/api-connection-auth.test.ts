@@ -11,6 +11,11 @@ const { requiredApiScope, API_SCOPES } = await import("../server/api-connection-
 
 test("maps public user API operations to stable scopes", () => {
   assert.equal(requiredApiScope("GET", "/workspaces/a/devices"), "devices:read");
+  assert.equal(requiredApiScope("POST", "/workspaces/a/devices"), "devices:manage");
+  assert.equal(requiredApiScope("POST", "/workspaces/a/device-enrollments"), "devices:manage");
+  assert.equal(requiredApiScope("POST", "/workspaces/a/devices/b/operations"), "devices:control");
+  assert.equal(requiredApiScope("GET", "/workspaces/a/device-operations/b/events"), "devices:read");
+  assert.equal(requiredApiScope("POST", "/workspaces/a/device-operations/b/cancel"), "devices:control");
   assert.equal(requiredApiScope("GET", "/bootstrap"), null);
   assert.equal(requiredApiScope("POST", "/workspaces/a/runners/pairing"), "runners:manage");
   assert.equal(requiredApiScope("POST", "/workspaces/a/builds"), "builds:create");

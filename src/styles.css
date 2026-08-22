@@ -1336,6 +1336,58 @@ h1, h2, h3 { text-wrap: balance; }
 .api-activity li small { color: var(--text-muted); }
 .api-account-note { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
 
+.gateway-page { display: grid; align-content: start; gap: 22px; }
+.gateway-enrollment, .gateway-devices, .gateway-call, .gateway-grants, .gateway-history { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 22px; }
+.gateway-enrollment { border-color: rgba(64, 216, 181, .32); background: linear-gradient(135deg, rgba(64, 216, 181, .08), var(--surface)); }
+.gateway-enrollment > div:first-child { display: flex; align-items: flex-start; gap: 13px; }
+.gateway-enrollment h2, .gateway-section-heading h2 { margin: 5px 0 0; font-size: 20px; }
+.gateway-enrollment p { margin: 6px 0 0; color: var(--text-soft); font-size: 13px; line-height: 1.6; }
+.gateway-step { display: grid; flex: 0 0 32px; height: 32px; place-items: center; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 850; }
+.gateway-enrollment form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 14px; margin-top: 20px; }
+.gateway-enrollment label, .gateway-call label, .gateway-grants > form > label { display: grid; gap: 8px; color: var(--text-soft); font-size: 13px; font-weight: 700; }
+.gateway-enrollment input, .gateway-call input:not([type="checkbox"]), .gateway-call select, .gateway-grants select { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); color: var(--text); padding: 10px 12px; }
+.pairing-result { display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-top: 20px; }
+.pairing-result > div { display: flex; flex-direction: column; gap: 4px; }
+.pairing-result span { color: var(--text-soft); font-size: 12px; }
+.pairing-result code { grid-column: 1 / -1; overflow-wrap: anywhere; border-radius: 10px; background: rgba(0,0,0,.26); padding: 13px; color: var(--accent); line-height: 1.55; }
+.gateway-layout { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px; }
+.gateway-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.gateway-section-heading > span { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: 99px; background: var(--surface-raised); color: var(--text-soft); font-size: 12px; }
+.gateway-device-list { display: grid; gap: 9px; margin-top: 18px; }
+.gateway-device { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; width: 100%; min-height: 64px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); padding: 10px; text-align: left; transition: border-color 170ms ease, background-color 170ms ease; }
+.gateway-device:hover, .gateway-device.selected { border-color: rgba(64,216,181,.38); background: var(--accent-soft); }
+.gateway-device-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: var(--surface-raised); color: var(--text-muted); }
+.gateway-device-icon.online { color: var(--accent); }
+.gateway-device > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.gateway-device strong, .gateway-device small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gateway-device small { color: var(--text-muted); font-size: 11px; }
+.gateway-call form { display: grid; gap: 15px; margin-top: 18px; }
+.gateway-call label > small { color: var(--text-muted); font-size: 12px; font-weight: 450; line-height: 1.5; }
+.gateway-call input[type="checkbox"] { width: 44px; height: 24px; accent-color: var(--accent); }
+.gateway-call .primary-button { justify-self: start; }
+.gateway-offline-note { display: flex; align-items: center; gap: 8px; margin: 0; border-radius: 10px; background: rgba(243,189,98,.08); padding: 11px; color: var(--warning); font-size: 12px; }
+.gateway-empty { display: grid; justify-items: center; gap: 9px; margin-top: 18px; border: 1px dashed var(--border); border-radius: 12px; padding: 30px 18px; color: var(--text-muted); text-align: center; }
+.gateway-empty strong { color: var(--text); }
+.gateway-empty p { max-width: 52ch; margin: 0; line-height: 1.6; }
+.gateway-empty.compact { padding: 20px 16px; }
+.gateway-grants > form { display: grid; grid-template-columns: minmax(150px,.8fr) minmax(150px,.8fr) minmax(240px,1.4fr) auto; align-items: end; gap: 14px; margin-top: 18px; }
+.gateway-grants fieldset { display: flex; min-height: 70px; flex-wrap: wrap; align-content: center; gap: 8px 14px; margin: 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.gateway-grants legend { padding-inline: 5px; color: var(--text-soft); font-size: 12px; font-weight: 700; }
+.gateway-grants fieldset label { display: inline-flex; min-height: 30px; align-items: center; gap: 7px; color: var(--text-soft); font-size: 12px; }
+.gateway-grants fieldset input { width: 18px; height: 18px; accent-color: var(--accent); }
+.grant-list { display: grid; gap: 8px; margin-top: 16px; }
+.grant-list > div { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; border-top: 1px solid var(--border); padding-top: 10px; color: var(--accent); }
+.grant-list span { color: var(--text); font-size: 13px; }
+.grant-list small { color: var(--text-muted); }
+.gateway-history ol { display: grid; gap: 0; margin: 16px 0 0; padding: 0; list-style: none; }
+.gateway-history li { display: grid; grid-template-columns: minmax(160px,.7fr) minmax(180px,1fr) auto auto; align-items: center; gap: 14px; min-height: 66px; border-top: 1px solid var(--border); }
+.gateway-history li > div { display: flex; flex-direction: column; gap: 3px; }
+.gateway-history li > div span, .gateway-history time, .gateway-history li > small { color: var(--text-muted); font-size: 12px; }
+.gateway-history li > small { grid-column: 2 / -1; margin-top: -12px; padding-bottom: 10px; color: var(--danger); }
+.operation-state { display: inline-flex; align-items: center; gap: 7px; color: var(--text-soft); font-size: 12px; font-weight: 700; }
+.operation-state.succeeded { color: var(--accent); }
+.operation-state.failed, .operation-state.expired { color: var(--danger); }
+
 @media (max-width: 640px) {
   .settings-pro-gate, .pro-feature-gate { align-items: flex-start; grid-template-columns: auto 1fr; }
   .settings-pro-gate > a, .pro-feature-gate > a { grid-column: 1 / -1; width: 100%; }
@@ -1345,6 +1397,16 @@ h1, h2, h3 { text-wrap: balance; }
   .api-connection-list header, .api-connection-list footer { align-items: flex-start; flex-direction: column; }
   .api-activity li { grid-template-columns: auto 1fr; }
   .api-activity li small { grid-column: 1 / -1; }
+  .gateway-enrollment form, .pairing-result, .gateway-layout, .gateway-grants > form { grid-template-columns: 1fr; }
+  .pairing-result code { grid-column: auto; }
+  .gateway-enrollment form .primary-button, .pairing-result .secondary-button, .gateway-call .primary-button, .gateway-grants > form .secondary-button { width: 100%; }
+  .gateway-device { grid-template-columns: 42px minmax(0, 1fr); }
+  .gateway-device > .state-pill { grid-column: 2; justify-self: start; }
+  .grant-list > div { grid-template-columns: auto 1fr; }
+  .grant-list small { grid-column: 2; }
+  .gateway-history li { grid-template-columns: 1fr auto; gap: 8px; padding-block: 13px; }
+  .gateway-history li > div, .gateway-history li > small { grid-column: 1 / -1; margin-top: 0; padding-bottom: 0; }
+  .gateway-history time { grid-column: 2; grid-row: 1; }
 }
 
 /* Public product, plan and legal pages */
@@ -2374,7 +2436,7 @@ td small {
 
   .main-nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 6px;
     margin-top: 0;
   }
@@ -2434,7 +2496,7 @@ td small {
 
   .main-nav {
     overflow-x: auto;
-    grid-template-columns: repeat(4, minmax(92px, 1fr));
+    grid-template-columns: repeat(6, minmax(92px, 1fr));
   }
 
   .nav-item {

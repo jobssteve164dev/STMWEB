@@ -67,6 +67,57 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE INDEX IF NOT EXISTS devices_workspace_idx ON devices(workspace_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS device_providers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name text NOT NULL CHECK (length(name) BETWEEN 1 AND 160),
+  credential_hash text NOT NULL UNIQUE CHECK (length(credential_hash) = 64),
+  credential_version integer NOT NULL DEFAULT 1,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+  last_seen_at timestamptz,
+  revoked_at timestamptz,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS device_providers_workspace_idx ON device_providers(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS device_enrollments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  code_hash text NOT NULL UNIQUE CHECK (length(code_hash) = 64),
+  provider_name text NOT NULL CHECK (length(provider_name) BETWEEN 1 AND 160),
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz,
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS provider_id uuid REFERENCES device_providers(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS provider_device_id text;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS connection_mode text NOT NULL DEFAULT 'nearby';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS remote_status text NOT NULL DEFAULT 'offline';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS capability_version text;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS current_operation_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS devices_provider_identity_idx
+  ON devices(provider_id, provider_device_id) WHERE provider_id IS NOT NULL AND provider_device_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS device_capability_manifests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  manifest_version text NOT NULL CHECK (length(manifest_version) BETWEEN 1 AND 120),
+  manifest_digest text NOT NULL CHECK (length(manifest_digest) = 64),
+  schema_version integer NOT NULL DEFAULT 1,
+  manifest jsonb NOT NULL CHECK (jsonb_typeof(manifest) = 'object'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (device_id, manifest_digest)
+);
+
+CREATE INDEX IF NOT EXISTS device_capabilities_current_idx
+  ON device_capability_manifests(device_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS hardware_projects (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -174,8 +225,12 @@ CREATE TABLE IF NOT EXISTS api_connections (
   last_used_at timestamptz,
   revoked_at timestamptz,
   CHECK (cardinality(scopes) > 0),
-  CHECK (scopes <@ ARRAY['devices:read','devices:control','debug:read','debug:execute','runners:read','runners:manage','builds:read','builds:create','builds:cancel','artifacts:read']::text[])
+  CHECK (scopes <@ ARRAY['devices:read','devices:manage','devices:control','debug:read','debug:execute','runners:read','runners:manage','builds:read','builds:create','builds:cancel','artifacts:read']::text[])
 );
+
+ALTER TABLE api_connections DROP CONSTRAINT IF EXISTS api_connections_scopes_check;
+ALTER TABLE api_connections ADD CONSTRAINT api_connections_scopes_check
+  CHECK (scopes <@ ARRAY['devices:read','devices:manage','devices:control','debug:read','debug:execute','runners:read','runners:manage','builds:read','builds:create','builds:cancel','artifacts:read']::text[]);
 
 CREATE INDEX IF NOT EXISTS api_connections_user_idx ON api_connections(user_id, created_at DESC);
 
@@ -189,6 +244,75 @@ CREATE TABLE IF NOT EXISTS api_audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS api_audit_events_connection_idx ON api_audit_events(connection_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS device_grants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  connection_id uuid NOT NULL REFERENCES api_connections(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  actions text[] NOT NULL,
+  permissions text[] NOT NULL DEFAULT ARRAY['read','control']::text[],
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  granted_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (connection_id, device_id),
+  CHECK (cardinality(actions) > 0),
+  CHECK (permissions <@ ARRAY['read','control']::text[])
+);
+
+CREATE INDEX IF NOT EXISTS device_grants_workspace_idx ON device_grants(workspace_id, connection_id);
+
+CREATE TABLE IF NOT EXISTS device_operations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  device_id uuid NOT NULL REFERENCES devices(id) ON DELETE RESTRICT,
+  provider_id uuid NOT NULL REFERENCES device_providers(id) ON DELETE RESTRICT,
+  action text NOT NULL CHECK (length(action) BETWEEN 1 AND 160),
+  arguments jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(arguments) = 'object'),
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','leased','accepted','running','cancelling','succeeded','failed','cancelled','expired')),
+  caller_key text NOT NULL CHECK (length(caller_key) BETWEEN 1 AND 200),
+  idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 8 AND 200),
+  created_by uuid NOT NULL REFERENCES internal_users(id) ON DELETE RESTRICT,
+  connection_id uuid REFERENCES api_connections(id) ON DELETE SET NULL,
+  execution_timeout_ms integer NOT NULL CHECK (execution_timeout_ms BETWEEN 1000 AND 300000),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  lease_id text,
+  leased_at timestamptz,
+  lease_expires_at timestamptz,
+  accepted_at timestamptz,
+  started_at timestamptz,
+  finished_at timestamptz,
+  result jsonb,
+  error_code text,
+  error_message text,
+  trace_id text,
+  priority integer NOT NULL DEFAULT 0,
+  UNIQUE (workspace_id, caller_key, idempotency_key)
+);
+
+ALTER TABLE device_operations ADD COLUMN IF NOT EXISTS priority integer NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS device_operations_workspace_idx ON device_operations(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS device_operations_provider_queue_idx ON device_operations(provider_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS device_operation_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  operation_id uuid NOT NULL REFERENCES device_operations(id) ON DELETE CASCADE,
+  workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  provider_id uuid REFERENCES device_providers(id) ON DELETE SET NULL,
+  event_id text NOT NULL CHECK (length(event_id) BETWEEN 1 AND 200),
+  sequence integer NOT NULL CHECK (sequence >= 0),
+  status text NOT NULL CHECK (status IN ('queued','leased','accepted','running','cancelling','succeeded','failed','cancelled','expired')),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(payload) = 'object'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (operation_id, event_id),
+  UNIQUE (operation_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS device_operation_events_operation_idx ON device_operation_events(operation_id, sequence);
 
 CREATE TABLE IF NOT EXISTS workbench_preferences (
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

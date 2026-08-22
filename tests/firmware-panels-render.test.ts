@@ -6,6 +6,7 @@ import test from "node:test";
 import { DotFirmwareFlashPanel } from "../src/DotFirmwareFlashPanel.js";
 import { BuildRunnerPanel } from "../src/BuildRunnerPanel.js";
 import { SwdFlashPanel } from "../src/InitialSwdFlashPanel.js";
+import { HardwareGatewayPanel } from "../src/HardwareGatewayPanel.js";
 import type { FirmwareVersionRecord } from "../src/db.js";
 
 Object.assign(globalThis, { React });
@@ -80,4 +81,14 @@ test("keeps the firmware list in a separate card below generation", async () => 
   assert.match(app, /<BuildRunnerPanel[\s\S]*<section className="workbench-card firmware-library-card"/);
   assert.match(app, /id="firmware-library-heading">\{c\("固件列表", "Firmware list"\)\}/);
   assert.match(styles, /\.firmware-library-card\s*\{[\s\S]*?margin-top:\s*20px;/);
+});
+
+test("renders the hardware gateway as user actions without internal routing concepts", () => {
+  const html = renderToStaticMarkup(React.createElement(HardwareGatewayPanel, { workspaceId: crypto.randomUUID(), onOpenSettings: () => undefined }));
+  assert.match(html, /注册设备/);
+  assert.match(html, /允许应用调用/);
+  assert.match(html, /调用设备/);
+  assert.match(html, /查看结果/);
+  assert.doesNotMatch(html, /Provider|Consumer|Lease|南向|北向|租约/);
+  assert.doesNotMatch(html, /speech\.say|motion\.play/);
 });

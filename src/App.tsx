@@ -856,15 +856,21 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               </section>
               <BuildRunnerPanel proAccess={planAccess.pro} />
               <input ref={fileInputRef} className="visually-hidden" type="file" accept=".bin,.hex,.elf,.axf,.srec" onChange={(event) => void importFirmware(event)} />
-              <div className="artifact-grid">
-                {combinedFirmware.map((version) => (
-                  <article className="artifact-card" key={version.id}>
-                    <span className="artifact-icon"><FileCode2 size={21} /></span>
-                    <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
-                    <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
-                  </article>
-                ))}
-              </div>
+              <section className="workbench-card firmware-library-card" aria-labelledby="firmware-library-heading">
+                <div className="firmware-library-heading">
+                  <div><span className="panel-kicker">{c("工作区固件", "Workspace firmware")}</span><h2 id="firmware-library-heading">{c("固件列表", "Firmware list")}</h2></div>
+                  <span>{c(`${combinedFirmware.length} 个固件`, `${combinedFirmware.length} firmware files`)}</span>
+                </div>
+                <div className="artifact-grid">
+                  {combinedFirmware.map((version) => (
+                    <article className="artifact-card" key={version.id}>
+                      <span className="artifact-icon"><FileCode2 size={21} /></span>
+                      <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                      <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
+                    </article>
+                  ))}
+                </div>
+              </section>
               <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("SWD 会核对芯片、容量和写入范围；无线烧录会重新核对硬件、应用分区和完整性。", "SWD checks the chip, capacity and write range. Wireless flashing re-checks the hardware, application partition and integrity.")}</p></div></div>
             </section>
           ) : null}

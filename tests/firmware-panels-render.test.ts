@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
@@ -62,4 +63,11 @@ test("renders the phase B flow in Firmware Management using user actions", () =>
   assert.match(html, /创建硬件项目/);
   assert.match(html, /平台会自动生成匹配的完整固件与应用固件/);
   assert.doesNotMatch(html, /固定适配与运行时版本/);
+});
+
+test("keeps the firmware list in a separate card below generation", async () => {
+  const [app, styles] = await Promise.all([readFile("src/App.tsx", "utf8"), readFile("src/styles.css", "utf8")]);
+  assert.match(app, /<BuildRunnerPanel[\s\S]*<section className="workbench-card firmware-library-card"/);
+  assert.match(app, /id="firmware-library-heading">\{c\("固件列表", "Firmware list"\)\}/);
+  assert.match(styles, /\.firmware-library-card\s*\{[\s\S]*?margin-top:\s*20px;/);
 });

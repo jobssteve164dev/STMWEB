@@ -46,6 +46,7 @@ assert.match(packageBuilder, /build_context_bytes/);
 assert.match(packageBuilder, /largest_source_contributors/);
 assert.match(packageVerifier, /package member set is invalid/);
 assert.match(packageVerifier, /test-firmware-compiler-image\.sh/);
+assert.match(compilerImageTest, /docker cp "\$SOURCE_ROOT\/\."/);
 assert.match(compilerImageTest, /for target in stm32f103cb stm32f103c8/);
 assert.match(compilerImageTest, /cmake --build "\$output" --parallel 1/);
 assert.match(compilerImageTest, /verify-dot-initial-firmware\.mjs/);

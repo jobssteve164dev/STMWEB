@@ -112,6 +112,25 @@ function event(jobId, type, message, payload = {}) {
   return { eventId: `${jobId}-${type}-${randomUUID()}`, type, message, payload };
 }
 
+class BuildCommandError extends Error {
+  constructor(exitCode, logTail, logUploaded) {
+    super(`固件编译失败，退出码 ${exitCode}`);
+    this.exitCode = exitCode;
+    this.logTail = logTail;
+    this.logUploaded = logUploaded;
+  }
+}
+
+function failureEvent(jobId, error) {
+  const message = error instanceof Error ? error.message : "构建失败";
+  if (!(error instanceof BuildCommandError)) return event(jobId, "failed", message);
+  return event(jobId, "failed", message, {
+    exitCode: error.exitCode,
+    logArtifact: error.logUploaded ? "build.log" : "",
+    logTail: error.logTail,
+  });
+}
+
 async function uploadArtifact(state, job, file, kind) {
   const content = await readFile(file);
   const name = path.basename(file);
@@ -190,12 +209,16 @@ async function execute(stateDir, state, job) {
       clearInterval(controlTimer);
     }
     const logFile = path.join(output, "build.log");
-    await writeFile(logFile, log.join("").slice(-2_000_000));
+    const logText = log.join("").slice(-2_000_000);
+    await writeFile(logFile, logText);
     if (cancelled) {
       await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "cancelled", "构建已按用户请求停止")]);
       return;
     }
-    if (status !== 0) throw new Error(`固件编译失败，退出码 ${status}`);
+    if (status !== 0) {
+      const logUploaded = await uploadArtifact(state, job, logFile, "log").then(() => true).catch(() => false);
+      throw new BuildCommandError(status, logText.slice(-12_000), logUploaded);
+    }
     const generatedManifestFile = path.join(output, "build", "stmweb_firmware_manifest.json");
     const generatedManifest = JSON.parse(await readFile(generatedManifestFile, "utf8"));
     if (generatedManifest.schemaVersion !== 1 || generatedManifest.adapter?.id !== job.hardwareProfileId
@@ -236,7 +259,7 @@ async function connect(args) {
       if (heartbeat.controls?.some((control) => control.action === "cancelled") && state.activeJob) state.cancelRequested = true;
       if (state.activeJob) {
         try { await execute(stateDir, state, state.activeJob); }
-        catch (error) { await sendEvents(stateDir, state, state.activeJob.id, state.activeJob.leaseId, [event(state.activeJob.id, "failed", error instanceof Error ? error.message : "构建失败")]); }
+        catch (error) { await sendEvents(stateDir, state, state.activeJob.id, state.activeJob.leaseId, [failureEvent(state.activeJob.id, error)]); }
         state.activeJob = null; state.cancelRequested = false; await saveState(stateDir, state);
       } else {
         const lease = await request(state, "/api/runner/jobs/lease", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
@@ -244,7 +267,7 @@ async function connect(args) {
           state.activeJob = lease.job;
           await saveState(stateDir, state);
           try { await execute(stateDir, state, lease.job); }
-          catch (error) { await sendEvents(stateDir, state, lease.job.id, lease.job.leaseId, [event(lease.job.id, "failed", error instanceof Error ? error.message : "构建失败")]); }
+          catch (error) { await sendEvents(stateDir, state, lease.job.id, lease.job.leaseId, [failureEvent(lease.job.id, error)]); }
           state.activeJob = null; state.cancelRequested = false; await saveState(stateDir, state);
         }
       }

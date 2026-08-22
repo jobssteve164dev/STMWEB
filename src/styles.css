@@ -3095,6 +3095,9 @@ td small {
 .initial-flash-copy { display: grid; gap: 6px; }
 .initial-flash-copy h2 { font-size: 18px; margin: 0; }
 .initial-flash-copy p { color: var(--text-muted); line-height: 1.55; margin: 0; }
+.swd-firmware-source { display: grid; gap: 7px; margin-top: 8px; }
+.swd-firmware-source > span { color: var(--text-muted); font-size: 12px; }
+.swd-firmware-source select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; padding: 0 10px; width: 100%; }
 .flash-safety { align-items: center; color: #67d5ad; display: flex; font-size: 13px; gap: 7px; }
 
 .firmware-flash-widget { grid-column: span 12; }

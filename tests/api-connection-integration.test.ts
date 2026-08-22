@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -47,7 +48,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
   }
   const connection = await pool.query<{ id: string }>(
     `INSERT INTO api_connections (user_id,workspace_id,name,purpose,scopes,credential_hash,credential_hint)
-     VALUES ($1,$2,'集成测试','验证权限边界',ARRAY['devices:read'], $3,$4) RETURNING id`,
+     VALUES ($1,$2,'集成测试','验证权限边界',ARRAY['devices:read','builds:create','artifacts:read'], $3,$4) RETURNING id`,
     [user.rows[0].id, workspaces.rows[0].id, createHash("sha256").update(credential).digest("hex"), credential.slice(-6)],
   );
 
@@ -87,6 +88,38 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
       method: "POST", headers: { Authorization: "Bearer legacy-provider-secret", "Content-Type": "application/json" },
       body: JSON.stringify({ tool: "list_tools", params: {} }),
     })).status, 401);
+
+    const firmwareBytes = readFileSync("public/firmware/dot-v1/dot_v1_compact_application.bin");
+    const mismatchedFirmware = new FormData();
+    mismatchedFirmware.set("file", new Blob([firmwareBytes]), "dot-compact.bin");
+    mismatchedFirmware.set("sha256", "0".repeat(64));
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware`, {
+      method: "POST", headers: { Authorization: `Bearer ${credential}` }, body: mismatchedFirmware,
+    })).status, 400);
+
+    const firmwareForm = new FormData();
+    firmwareForm.set("file", new Blob([firmwareBytes]), "dot-compact.bin");
+    const firmwareUpload = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware`, {
+      method: "POST", headers: { Authorization: `Bearer ${credential}` }, body: firmwareForm,
+    });
+    assert.equal(firmwareUpload.status, 201);
+    const firmwareBody = await firmwareUpload.json() as { firmware: { id: string; sha256: string; hardwareProfileId: string; artifactRole: string; flashMethods: string[]; flashSize: number; status: string } };
+    assert.equal(firmwareBody.firmware.sha256, createHash("sha256").update(firmwareBytes).digest("hex"));
+    assert.equal(firmwareBody.firmware.hardwareProfileId, "stmweb.dot-v1");
+    assert.equal(firmwareBody.firmware.artifactRole, "application");
+    assert.deepEqual(firmwareBody.firmware.flashMethods, ["swd", "bluetooth"]);
+    assert.equal(firmwareBody.firmware.flashSize, 64 * 1024);
+    assert.equal(firmwareBody.firmware.status, "verified");
+
+    const firmwareList = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware`, { headers });
+    assert.equal(firmwareList.status, 200);
+    const firmwareListBody = await firmwareList.json() as { firmware: Array<{ id: string; hardwareProfileId: string }> };
+    assert.equal(firmwareListBody.firmware.length, 1);
+    assert.equal(firmwareListBody.firmware[0].hardwareProfileId, "stmweb.dot-v1");
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[1].id}/firmware`, { headers })).status, 403);
+    const firmwareContent = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/firmware/${firmwareBody.firmware.id}/content`, { headers });
+    assert.equal(firmwareContent.status, 200);
+    assert.deepEqual(Buffer.from(await firmwareContent.arrayBuffer()), firmwareBytes);
 
     await pool.query(`UPDATE api_connections SET status='revoked',revoked_at=now() WHERE id=$1`, [connection.rows[0].id]);
     assert.equal((await fetch(`${base}/bootstrap`, { headers })).status, 401);

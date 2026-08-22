@@ -1,22 +1,44 @@
 import { Check, CircleAlert, Cpu, Loader2, ShieldCheck } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flashDotInitialFirmware, parseDotInitialHex, requestCmsisDapProbe, type CmsisDapPacketTransport, type CmsisDapProbeKind, type SwdFlashProgress, type SwdFlashResult } from "./cmsis-dap-swd.js";
+import { loadFirmwareContent, type FirmwareVersionRecord } from "./db.js";
+import { loadBuiltInDotArtifacts } from "./firmware-manifest.js";
 import { useLocale } from "./i18n.js";
 
-const initialFirmwareUrls = [
-  [128, "/firmware/dot-v1/dot_v1_initial_swd.hex"],
-  [64, "/firmware/dot-v1/dot_v1_compact_initial_swd.hex"],
-] as const;
+const builtInFirmwareId = "built-in-dot-stable";
 
-export function InitialSwdFlashPanel() {
+interface SwdFlashPanelProps {
+  firmwareVersions: FirmwareVersionRecord[];
+}
+
+export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
   const { isEnglish } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<SwdFlashProgress | null>(null);
   const [result, setResult] = useState<SwdFlashResult | null>(null);
   const [error, setError] = useState("");
+  const [savedId, setSavedId] = useState(builtInFirmwareId);
   const [resetStep, setResetStep] = useState<"hold" | "release" | "release-after-failure" | null>(null);
   const resetAction = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null);
+  const savedSwdImages = useMemo(() => firmwareVersions.filter((item) => item.hardwareProfileId === "stmweb.dot-v1"
+    && item.artifactRole === "complete-image" && item.flashMethods.includes("swd")
+    && (item.status === "verified" || item.status === "stable")), [firmwareVersions]);
+
+  useEffect(() => {
+    if (savedId !== builtInFirmwareId && !savedSwdImages.some((item) => item.id === savedId)) setSavedId(builtInFirmwareId);
+  }, [savedId, savedSwdImages]);
+
+  async function selectedFirmwares() {
+    if (savedId === builtInFirmwareId) {
+      const firmwarePackage = await loadBuiltInDotArtifacts("complete-image", "swd");
+      return firmwarePackage.artifacts.map((artifact) => parseDotInitialHex(new TextDecoder().decode(artifact.bytes), artifact.flashSize === 64 * 1024 ? 64 : 128));
+    }
+    const saved = savedSwdImages.find((item) => item.id === savedId);
+    if (!saved || (saved.flashSize !== 64 * 1024 && saved.flashSize !== 128 * 1024)) throw new Error(c("请选择可用于当前 DOT 的 SWD 固件", "Choose SWD firmware compatible with this DOT"));
+    const bytes = await loadFirmwareContent(saved.id);
+    return [parseDotInitialHex(new TextDecoder().decode(bytes), saved.flashSize === 64 * 1024 ? 64 : 128)];
+  }
 
   function waitForResetAction(step: "hold" | "release" | "release-after-failure") {
     setResetStep(step);
@@ -41,17 +63,14 @@ export function InitialSwdFlashPanel() {
     try {
       setProgress({ stage: "connecting", percent: 1, detail: c("请选择与小车连接的调试探针", "Choose the debug probe connected to the vehicle") });
       selectedTransport = await requestCmsisDapProbe(probeKind);
-      if (!window.confirm(c("即将擦除目标芯片并写入 DOT 初始固件。请确认 CMSIS-DAP 探针已通过 SWDIO、SWCLK、GND 与小车连接，并保持稳定供电。", "The target chip will be erased and the DOT bootstrap firmware installed. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the vehicle powered."))) {
+      const selectedName = savedId === builtInFirmwareId ? c("内置 DOT 稳定版", "Built-in DOT stable firmware") : savedSwdImages.find((item) => item.id === savedId)?.fileName ?? c("所选固件", "the selected firmware");
+      if (!window.confirm(c(`即将通过 SWD 写入 ${selectedName}。请确认 CMSIS-DAP 探针已连接 SWDIO、SWCLK、GND，并保持设备稳定供电。`, `The selected firmware will be written over SWD. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the device powered.`))) {
         await selectedTransport.close();
         selectedTransport = undefined;
         setProgress(null);
         return;
       }
-      const firmwares = await Promise.all(initialFirmwareUrls.map(async ([flashKilobytes, url]) => {
-        const response = await fetch(url, { cache: "no-store" });
-        if (!response.ok) throw new Error(c("无法读取内置 DOT 初始固件", "The built-in DOT bootstrap firmware could not be loaded"));
-        return parseDotInitialHex(await response.text(), flashKilobytes);
-      }));
+      const firmwares = await selectedFirmwares();
       setResult(await flashDotInitialFirmware(firmwares, setProgress, {
         holdReset: async () => {
           setProgress({ stage: "connecting", percent: 2, detail: c("等待按住小车 RESET", "Waiting for RESET to be held") });
@@ -77,7 +96,7 @@ export function InitialSwdFlashPanel() {
         ? probeKind === "hid"
           ? c("未选择 DAPLink / CMSIS-DAP。请在系统设备窗口中选择新探针；如果使用 SLogic Combo8，请点击下方专用入口。", "No DAPLink / CMSIS-DAP was selected. Choose the new probe in the system picker, or use the SLogic Combo8 option below.")
           : c("未选择 SLogic Combo8。请确认探针已连接电脑后重试。", "No SLogic Combo8 was selected. Connect the probe to this computer and try again.")
-        : caught instanceof Error ? caught.message : c("初始固件写入失败", "Bootstrap flashing failed"));
+        : caught instanceof Error ? caught.message : c("SWD 烧录失败", "SWD flashing failed"));
     } finally {
       if (selectedTransport) await selectedTransport.close().catch(() => undefined);
       setBusy(false);
@@ -88,10 +107,11 @@ export function InitialSwdFlashPanel() {
     <article className="initial-flash-card">
       <div className="initial-flash-icon"><Cpu size={24} /></div>
       <div className="initial-flash-copy">
-        <span className="panel-kicker">{c("第一次连接", "First connection")}</span>
-        <h2>{c("通过 SWD 安装无线升级入口", "Install wireless updates over SWD")}</h2>
-        <p>{c("用于 DOT V1。系统会先识别芯片与 Flash 容量，自动选择 64 KiB 紧凑版或 128 KiB 标准版，匹配后才会擦除并写入。", "For DOT V1. The chip and Flash capacity are checked first, then the matching 64 KiB compact or 128 KiB standard firmware is selected before any erase or write.")}</p>
-        <div className="flash-safety"><ShieldCheck size={16} /><span>{c("写入完成后即可断开探针，后续更新使用蓝牙。", "After installation, disconnect the probe and use Bluetooth for future updates.")}</span></div>
+        <span className="panel-kicker">{c("长期有线烧录", "Wired flashing")}</span>
+        <h2>{c("通过 SWD 安装、更新或恢复", "Install, update or recover over SWD")}</h2>
+        <p>{c("用于 DOT V1 的日常有线烧录和设备恢复。系统会先识别芯片与 Flash 容量，只有固件完全匹配后才会擦除并写入。", "Use SWD for routine wired flashing and recovery on DOT V1. The chip and Flash capacity are checked before any matching firmware is erased or written.")}</p>
+        <label className="swd-firmware-source"><span>{c("烧录固件", "Firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => setSavedId(event.target.value)}><option value={builtInFirmwareId}>{c("内置 DOT 稳定版（自动匹配）", "Built-in DOT stable firmware (automatic match)")}</option>{savedSwdImages.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label>
+        <div className="flash-safety"><ShieldCheck size={16} /><span>{c("SWD 始终可用；支持蓝牙的固件也可以在写入后改用无线更新。", "SWD remains available. Firmware with Bluetooth support can also use wireless updates after flashing.")}</span></div>
         {resetStep ? <div className="reset-connect-prompt" role="alertdialog" aria-live="assertive">
           <strong>{resetStep === "hold" ? c("现在按住小车 RESET，不要松开", "Press and keep holding the vehicle RESET button") : c("现在松开小车 RESET", "Release the vehicle RESET button now")}</strong>
           <p>{resetStep === "hold"
@@ -105,11 +125,11 @@ export function InitialSwdFlashPanel() {
           </div>
         </div> : null}
         {progress ? <div className="flash-progress" aria-live="polite"><div><span>{progress.detail}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
-        {result ? <div className="flash-result success"><Check size={17} /><span>{c(`初始固件已写入 · ${result.probeName} · ${result.flashSize / 1024} KiB`, `Bootstrap installed · ${result.probeName} · ${result.flashSize / 1024} KiB`)}</span></div> : null}
+        {result ? <div className="flash-result success"><Check size={17} /><span>{c(`SWD 烧录完成 · ${result.probeName} · ${result.flashSize / 1024} KiB`, `SWD flashing complete · ${result.probeName} · ${result.flashSize / 1024} KiB`)}</span></div> : null}
         {error ? <div className="flash-result error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : null}
       </div>
       <div className="initial-flash-actions">
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void flash("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并安装", "Connect DAPLink & Install")}</button>
+        <button className="primary-button" type="button" disabled={busy} onClick={() => void flash("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并烧录", "Connect DAPLink & Flash")}</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => void flash("slogic-combo8")}>{c("使用 SLogic Combo8", "Use SLogic Combo8")}</button>
       </div>
     </article>

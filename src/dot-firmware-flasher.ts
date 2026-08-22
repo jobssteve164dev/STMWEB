@@ -214,7 +214,7 @@ function beginPayload(size: number, checksum: number): Uint8Array {
 }
 
 function parseHello(payload: Uint8Array): DotBootloaderInfo {
-  if (payload.byteLength < 20) throw new Error("设备 Bootloader 版本过旧，请先通过 SWD 写入新版初始固件");
+  if (payload.byteLength < 20) throw new Error("设备 Bootloader 版本过旧，请先通过 SWD 写入最新版 DOT 固件");
   return {
     flashSize: readU32(payload, 0),
     applicationBase: readU32(payload, 4),

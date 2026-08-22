@@ -77,7 +77,7 @@ import {
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
 import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
-import { InitialSwdFlashPanel } from "./InitialSwdFlashPanel.js";
+import { SwdFlashPanel } from "./InitialSwdFlashPanel.js";
 import { useLocale } from "./i18n.js";
 
 type ViewId = "console" | "devices" | "firmware" | "sessions" | "settings";
@@ -129,12 +129,20 @@ const emptyDevice: DeviceRecord = {
   note: "",
 };
 
-const exampleFirmware = {
+const exampleFirmware: FirmwareVersionRecord & { isExample: true } = {
   id: "example-v084",
   fileName: "env-node-v0.8.4.elf",
   fileSize: 726_304,
   fileType: "ELF",
   sha256: "4f390d4c1b83a2f7",
+  hardwareProfileId: null,
+  artifactRole: "unclassified",
+  flashMethods: [],
+  flashSize: null,
+  applicationBase: null,
+  applicationLimit: null,
+  runtimeVersion: null,
+  status: "draft",
   createdAt: "2026-08-12T09:40:00.000Z",
   isExample: true,
 };
@@ -173,13 +181,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-async function hashFile(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function MetricCard({ label, value, note, icon: Icon }: MetricCardProps) {
@@ -591,22 +592,13 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     if (!file) return;
     setFileBusy(true);
     try {
-      const sha256 = await hashFile(file);
-      const version: FirmwareVersionRecord = {
-        id: crypto.randomUUID(),
-        projectId: workspace.id,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.name.split(".").pop()?.toUpperCase() || file.type || "FILE",
-        sha256,
-        createdAt: new Date().toISOString(),
-        blob: file,
-      };
-      const savedVersion = await saveFirmwareVersion(version);
+      const savedVersion = await saveFirmwareVersion(file);
       setFirmwareVersions((current) => [savedVersion, ...current.filter((item) => item.id !== savedVersion.id)]);
-      setToast({ tone: "success", message: c(`${file.name} 已校验并保存`, `${file.name} was verified and saved`) });
-    } catch {
-      setToast({ tone: "warning", message: c("固件文件保存失败，请检查浏览器存储空间", "The firmware file could not be saved. Check available browser storage.") });
+      setToast(savedVersion.status === "verified" || savedVersion.status === "stable"
+        ? { tone: "success", message: c(`${file.name} 已识别并保存，可用于匹配的烧录方式`, `${file.name} was identified and is ready for compatible flashing`) }
+        : { tone: "info", message: c(`${file.name} 已保存为待适配制品，不会用于烧录`, `${file.name} was saved for adaptation and will not be offered for flashing`) });
+    } catch (error) {
+      setToast({ tone: "warning", message: error instanceof Error ? error.message : c("固件文件保存失败", "The firmware file could not be saved") });
     } finally {
       setFileBusy(false);
     }
@@ -847,10 +839,10 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               <section className="firmware-actions" aria-labelledby="firmware-actions-heading">
                 <div className="firmware-actions-heading">
                   <div><span className="panel-kicker">{c("常用工具", "Common tools")}</span><h2 id="firmware-actions-heading">{c("固件安装与升级", "Firmware installation & updates")}</h2></div>
-                  <p>{c("第一次使用 SWD 安装无线升级入口，之后直接通过蓝牙更新应用固件。", "Install wireless updates over SWD the first time, then update application firmware directly over Bluetooth.")}</p>
+                  <p>{c("SWD 可长期用于安装、更新和恢复；硬件支持无线时，也可以直接升级应用。", "Use SWD for installation, updates and recovery at any time. Compatible hardware can also update applications wirelessly.")}</p>
                 </div>
                 <div className="firmware-actions-grid">
-                  <InitialSwdFlashPanel />
+                  <SwdFlashPanel firmwareVersions={firmwareVersions} />
                   <DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} />
                 </div>
               </section>
@@ -859,12 +851,12 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                 {combinedFirmware.map((version) => (
                   <article className="artifact-card" key={version.id}>
                     <span className="artifact-icon"><FileCode2 size={21} /></span>
-                    <div className="artifact-main"><div><strong>{version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{c("已保存", "Saved")}</span>}</div><p>{version.fileType} · {formatBytes(version.fileSize)}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                    <div className="artifact-main"><div><strong>{version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件", "Complete image") : c("应用固件", "Application")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
                     <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
                   </article>
                 ))}
               </div>
-              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("初始安装会先识别 SWD 芯片与容量；后续蓝牙烧录会重新核对应用分区和完整性。", "Initial installation checks the SWD target and capacity; later Bluetooth updates re-check the application partition and integrity.")}</p></div></div>
+              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("SWD 会核对芯片、容量和写入范围；无线烧录会重新核对硬件、应用分区和完整性。", "SWD checks the chip, capacity and write range. Wireless flashing re-checks the hardware, application partition and integrity.")}</p></div></div>
             </section>
           ) : null}
 

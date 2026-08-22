@@ -25,11 +25,20 @@ export interface DebugEventRecord {
 
 export interface FirmwareVersionRecord {
   id: string;
-  projectId: string;
+  projectId?: string;
+  workspaceId?: string;
   fileName: string;
   fileSize: number;
   fileType: string;
   sha256: string;
+  hardwareProfileId: string | null;
+  artifactRole: "complete-image" | "application" | "unclassified";
+  flashMethods: Array<"swd" | "bluetooth">;
+  flashSize: number | null;
+  applicationBase: number | null;
+  applicationLimit: number | null;
+  runtimeVersion: string | null;
+  status: "draft" | "verified" | "stable" | "retired";
   createdAt: string;
   blob?: Blob;
 }
@@ -139,12 +148,9 @@ export async function listEvents(sessionId: string): Promise<DebugEventRecord[]>
   return result.events;
 }
 
-export async function saveFirmwareVersion(version: FirmwareVersionRecord): Promise<FirmwareVersionRecord> {
-  if (!version.blob) throw new Error("固件内容不可用");
+export async function saveFirmwareVersion(file: File): Promise<FirmwareVersionRecord> {
   const form = new FormData();
-  form.set("file", version.blob, version.fileName);
-  form.set("sha256", version.sha256);
-  form.set("fileType", version.fileType);
+  form.set("file", file, file.name);
   const result = await requestJson<{ firmware: FirmwareVersionRecord }>(
     `/api/workspaces/${workspaceId()}/firmware`,
     { method: "POST", body: form },

@@ -2,6 +2,7 @@ import { Check, CircleAlert, FileCode2, Loader2, Radio, Upload } from "lucide-re
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { loadFirmwareContent, type DebugEventRecord, type FirmwareVersionRecord } from "./db.js";
 import { flashDotApplication, validateDotApplication, type DotApplicationFirmware, type DotFlashProgress } from "./dot-firmware-flasher.js";
+import { loadBuiltInDotArtifacts } from "./firmware-manifest.js";
 import type { HardwareConnection } from "./hardware.js";
 import { useLocale } from "./i18n.js";
 
@@ -15,10 +16,6 @@ interface DotFirmwareFlashPanelProps {
 interface SelectedFirmware { name: string; bytes: DotApplicationFirmware }
 
 const builtInFirmwareId = "built-in-dot-stable";
-const builtInFirmwareUrls = [
-  "/firmware/dot-v1/dot_v1_application.bin",
-  "/firmware/dot-v1/dot_v1_compact_application.bin",
-] as const;
 
 const stageLabels: Record<DotFlashProgress["stage"], [string, string]> = {
   entering: ["正在进入升级模式", "Entering update mode"],
@@ -32,7 +29,9 @@ const stageLabels: Record<DotFlashProgress["stage"], [string, string]> = {
 export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, onEvent }: DotFirmwareFlashPanelProps) {
   const { isEnglish } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
-  const savedBins = useMemo(() => firmwareVersions.filter((item) => item.fileName.toLowerCase().endsWith(".bin") || item.fileType.toLowerCase() === "bin"), [firmwareVersions]);
+  const savedBins = useMemo(() => firmwareVersions.filter((item) => item.hardwareProfileId === "stmweb.dot-v1"
+    && item.artifactRole === "application" && item.flashMethods.includes("bluetooth")
+    && (item.status === "verified" || item.status === "stable")), [firmwareVersions]);
   const [savedId, setSavedId] = useState(builtInFirmwareId);
   const [localFirmware, setLocalFirmware] = useState<SelectedFirmware | null>(null);
   const [progress, setProgress] = useState<DotFlashProgress | null>(null);
@@ -62,14 +61,10 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
   async function selectedFirmware(): Promise<SelectedFirmware> {
     if (localFirmware) return localFirmware;
     if (savedId === builtInFirmwareId) {
-      const bytes = await Promise.all(builtInFirmwareUrls.map(async (url) => {
-        const response = await fetch(url, { cache: "no-store" });
-        if (!response.ok) throw new Error(c("无法读取内置 DOT 应用固件", "The built-in DOT application firmware could not be loaded"));
-        const firmware = new Uint8Array(await response.arrayBuffer());
-        validateDotApplication(firmware);
-        return firmware;
-      }));
-      return { name: c("内置 DOT 稳定版（自动匹配）", "Built-in DOT stable firmware (automatic match)"), bytes };
+      const firmwarePackage = await loadBuiltInDotArtifacts("application", "bluetooth");
+      const bytes = firmwarePackage.artifacts.map((artifact) => artifact.bytes);
+      bytes.forEach(validateDotApplication);
+      return { name: c(`${firmwarePackage.label}（自动匹配）`, `${firmwarePackage.label} (automatic match)`), bytes };
     }
     const saved = savedBins.find((item) => item.id === savedId);
     if (!saved) throw new Error(c("请先选择应用固件", "Choose an application firmware first"));

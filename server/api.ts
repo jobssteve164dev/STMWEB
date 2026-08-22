@@ -8,6 +8,7 @@ import { env } from "./env.js";
 import { digestRunnerSecret } from "./runner-auth.js";
 import { requireConnectionScope, requireConnectionWorkspace, requireUserOrApiConnection, type AuthenticatedApiRequest } from "./api-connection-auth.js";
 import { hasStmwebProAccess } from "./passport.js";
+import { prepareFirmwareUpload } from "./firmware-artifact.js";
 
 interface AuthenticatedRequest extends Request {
   currentUser: { id: string; username: string; name: string; email: string; passportUserId: string };
@@ -181,7 +182,10 @@ router.get("/workspaces/:workspaceId/firmware", asyncRoute(async (request, respo
   await requireWorkspace(user.id, workspaceId);
   const result = await pool.query(
     `SELECT id, workspace_id AS "workspaceId", file_name AS "fileName", file_size::bigint::text AS "fileSize",
-            file_type AS "fileType", sha256, created_at AS "createdAt"
+            file_type AS "fileType", sha256, hardware_profile_id AS "hardwareProfileId",
+            artifact_role AS "artifactRole", flash_methods AS "flashMethods", flash_size AS "flashSize",
+            application_base AS "applicationBase", application_limit AS "applicationLimit",
+            runtime_version AS "runtimeVersion", status, created_at AS "createdAt"
      FROM firmware_versions WHERE workspace_id = $1 ORDER BY created_at DESC`,
     [workspaceId],
   );
@@ -197,16 +201,33 @@ router.post("/workspaces/:workspaceId/firmware", upload.single("file"), asyncRou
     response.status(400).json({ error: "请选择固件文件" });
     return;
   }
-  const sha256 = z.string().regex(/^[a-f0-9]{64}$/).parse(request.body.sha256);
-  const fileType = z.string().trim().min(1).max(32).parse(request.body.fileType);
+  let prepared;
+  try {
+    const clientSha256 = request.body.sha256 ? z.string().regex(/^[a-f0-9]{64}$/).parse(request.body.sha256) : undefined;
+    prepared = prepareFirmwareUpload(request.file.buffer, request.file.originalname, clientSha256);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "固件文件无法验证" });
+    return;
+  }
   const result = await pool.query(
     `INSERT INTO firmware_versions
-       (workspace_id, uploaded_by, file_name, file_size, file_type, sha256, content)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     ON CONFLICT (workspace_id, sha256) DO UPDATE SET file_name = EXCLUDED.file_name
+       (workspace_id, uploaded_by, file_name, file_size, file_type, sha256, content,
+        hardware_profile_id,artifact_role,flash_methods,flash_size,application_base,application_limit,runtime_version,status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     ON CONFLICT (workspace_id, sha256) DO UPDATE SET
+       file_name=EXCLUDED.file_name,file_size=EXCLUDED.file_size,file_type=EXCLUDED.file_type,content=EXCLUDED.content,
+       hardware_profile_id=EXCLUDED.hardware_profile_id,artifact_role=EXCLUDED.artifact_role,
+       flash_methods=EXCLUDED.flash_methods,flash_size=EXCLUDED.flash_size,
+       application_base=EXCLUDED.application_base,application_limit=EXCLUDED.application_limit,
+       runtime_version=EXCLUDED.runtime_version,status=EXCLUDED.status
      RETURNING id, workspace_id AS "workspaceId", file_name AS "fileName", file_size::bigint::text AS "fileSize",
-               file_type AS "fileType", sha256, created_at AS "createdAt"`,
-    [workspaceId, user.id, request.file.originalname, request.file.size, fileType, sha256, request.file.buffer],
+               file_type AS "fileType", sha256, hardware_profile_id AS "hardwareProfileId",
+               artifact_role AS "artifactRole", flash_methods AS "flashMethods", flash_size AS "flashSize",
+               application_base AS "applicationBase", application_limit AS "applicationLimit",
+               runtime_version AS "runtimeVersion", status, created_at AS "createdAt"`,
+    [workspaceId, user.id, request.file.originalname, request.file.size, prepared.fileType, prepared.sha256, request.file.buffer,
+      prepared.hardwareProfileId, prepared.artifactRole, prepared.flashMethods, prepared.flashSize,
+      prepared.applicationBase, prepared.applicationLimit, prepared.runtimeVersion, prepared.status],
   );
   response.status(201).json({ firmware: { ...result.rows[0], fileSize: Number(result.rows[0].fileSize) } });
 }));

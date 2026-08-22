@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "packageId": "stmweb.dot-v1.stable",
+  "label": "DOT V1 稳定版",
+  "hardwareProfileId": "stmweb.dot-v1",
+  "runtimeVersion": "1",
+  "variants": [
+    {
+      "flashSize": 65536,
+      "applicationBase": 134221824,
+      "applicationLimit": 134282240,
+      "artifacts": [
+        {
+          "role": "complete-image",
+          "format": "ihex",
+          "flashMethods": [
+            "swd"
+          ],
+          "url": "/firmware/dot-v1/dot_v1_compact_initial_swd.hex",
+          "size": 151885,
+          "sha256": "da9599f6ea0b6d1d25c3f043823dcd64ec29d3cfdd010fb1401ae8c1de716c22"
+        },
+        {
+          "role": "application",
+          "format": "bin",
+          "flashMethods": [
+            "swd",
+            "bluetooth"
+          ],
+          "url": "/firmware/dot-v1/dot_v1_compact_application.bin",
+          "size": 53048,
+          "sha256": "5bcc3fdaab3bc17861cbbb379d8fa8d8381d11328e07000fc1b5a2d69d515f3a"
+        }
+      ]
+    },
+    {
+      "flashSize": 131072,
+      "applicationBase": 134234112,
+      "applicationLimit": 134347776,
+      "artifacts": [
+        {
+          "role": "complete-image",
+          "format": "ihex",
+          "flashMethods": [
+            "swd"
+          ],
+          "url": "/firmware/dot-v1/dot_v1_initial_swd.hex",
+          "size": 254293,
+          "sha256": "3758846f48e724c33dd249d7053d53f08b0ce75a5c7f199a45b2420a99b2a9a8"
+        },
+        {
+          "role": "application",
+          "format": "bin",
+          "flashMethods": [
+            "swd",
+            "bluetooth"
+          ],
+          "url": "/firmware/dot-v1/dot_v1_application.bin",
+          "size": 90280,
+          "sha256": "2f5519514b725229cb3435e1af0d55e85c473aee7634ab547784475be0dc51a6"
+        }
+      ]
+    }
+  ]
+}

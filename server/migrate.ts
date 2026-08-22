@@ -77,9 +77,35 @@ CREATE TABLE IF NOT EXISTS firmware_versions (
   file_type text NOT NULL,
   sha256 text NOT NULL CHECK (length(sha256) = 64),
   content bytea NOT NULL,
+  hardware_profile_id text,
+  artifact_role text NOT NULL DEFAULT 'unclassified',
+  flash_methods text[] NOT NULL DEFAULT ARRAY[]::text[],
+  flash_size integer,
+  application_base integer,
+  application_limit integer,
+  runtime_version text,
+  status text NOT NULL DEFAULT 'draft',
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (workspace_id, sha256)
+  UNIQUE (workspace_id, sha256),
+  CHECK (artifact_role IN ('complete-image','application','unclassified')),
+  CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]),
+  CHECK (status IN ('draft','verified','stable','retired'))
 );
+
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS hardware_profile_id text;
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS artifact_role text NOT NULL DEFAULT 'unclassified';
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS flash_methods text[] NOT NULL DEFAULT ARRAY[]::text[];
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS flash_size integer;
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS application_base integer;
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS application_limit integer;
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS runtime_version text;
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft';
+ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_artifact_role_check;
+ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_artifact_role_check CHECK (artifact_role IN ('complete-image','application','unclassified'));
+ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_flash_methods_check;
+ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_flash_methods_check CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]);
+ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_status_check;
+ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_status_check CHECK (status IN ('draft','verified','stable','retired'));
 
 CREATE INDEX IF NOT EXISTS firmware_workspace_idx ON firmware_versions(workspace_id, created_at DESC);
 

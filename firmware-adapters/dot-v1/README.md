@@ -13,6 +13,7 @@
 - `stm32f103c8` 使用 64 KiB 紧凑布局：4 KiB Bootloader、从 `0x08001000` 启动的 59 KiB 应用以及末页初始化标记；超容必须链接失败。
 - 两个目标都生成 `dot_v1_initial_swd.hex`，供网页在 SWD 读回实际容量后自动选择。
 - 两个目标的 `dot_v1.bin` 同时作为内置蓝牙应用固件发布；网页先读取 Bootloader 分区信息，再自动选择完全匹配的 64/128 KiB 版本。
+- 构建脚本同时生成 `public/firmware/dot-v1/manifest.json`，以同一硬件适配 ID 描述两种容量、完整 SWD 镜像、应用镜像、烧录方式、大小和 SHA-256；网页只从该清单读取内置制品。
 - 应用收到 `STMWEB:BOOT` 后先停止电机，再通过备份寄存器请求重启进入 Bootloader。Bootloader 使用原车 USART3（PB10/PB11、115200 8N1）接收带序号与 CRC32 的分块固件。
 - 应用区域止于 `0x0801FC00`，最后 1 KiB 保存应用有效标记、长度和 CRC32；升级开始先清除该页，因此断电或传输中断不会启动残缺应用。
 

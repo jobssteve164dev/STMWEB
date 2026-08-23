@@ -561,6 +561,9 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
           }
           appendEvent("data", text.trim() || c("收到串口数据", "Serial data received"));
         },
+        onDisconnect: () => {
+          void handleUnexpectedHardwareDisconnect();
+        },
       });
       connectionRef.current = connection;
       setConnectionInfo({
@@ -583,16 +586,29 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     }
   }
 
-  async function disconnectHardware() {
-    if (currentSessionRef.current) await stopSession();
-    await connectionRef.current?.close().catch(() => undefined);
-    connectionRef.current = null;
+  function clearHardwareConnectionState() {
     setConnectionInfo(null);
     setDeviceManifest(null);
     setSelectedComponents([]);
     setTelemetry([]);
     dotTelemetryCarryRef.current = "";
     setLogs([]);
+  }
+
+  async function handleUnexpectedHardwareDisconnect() {
+    if (!connectionRef.current) return;
+    connectionRef.current = null;
+    clearHardwareConnectionState();
+    if (currentSessionRef.current) await stopSession();
+    setToast({ tone: "warning", message: c("蓝牙连接已断开", "Bluetooth disconnected") });
+  }
+
+  async function disconnectHardware() {
+    const connection = connectionRef.current;
+    connectionRef.current = null;
+    clearHardwareConnectionState();
+    if (currentSessionRef.current) await stopSession();
+    await connection?.close().catch(() => undefined);
     setToast({ tone: "info", message: c("设备连接已断开", "Device disconnected") });
   }
 

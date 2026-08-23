@@ -59,6 +59,8 @@ interface BluetoothDeviceLike {
     connect(): Promise<BluetoothServerLike>;
     disconnect(): void;
   };
+  addEventListener(type: "gattserverdisconnected", listener: (event: Event) => void): void;
+  removeEventListener(type: "gattserverdisconnected", listener: (event: Event) => void): void;
 }
 
 interface BluetoothCharacteristicLike extends EventTarget {
@@ -188,6 +190,7 @@ export async function requestHardwareConnection(
     networkUrl?: string;
     serial?: SerialConnectionOptions;
     onSerialText?: (text: string) => void;
+    onDisconnect?: () => void;
   } = {},
 ): Promise<HardwareConnection> {
   const hardwareNavigator = navigator as HardwareNavigator;
@@ -279,6 +282,10 @@ export async function requestHardwareConnection(
     let notifyCharacteristic: BluetoothCharacteristicLike | undefined;
     let handleNotification: ((event: Event) => void) | undefined;
     let dataHandler: ((data: Uint8Array) => void) | null = null;
+    let closed = false;
+    const handleDisconnect = () => {
+      if (!closed) options.onDisconnect?.();
+    };
     try {
       server = await device.gatt.connect();
       const service = await server.getPrimaryService(ECB02_GATT.service);
@@ -293,6 +300,7 @@ export async function requestHardwareConnection(
         else options.onSerialText?.(new TextDecoder().decode(bytes));
       };
       notifyCharacteristic.addEventListener("characteristicvaluechanged", handleNotification);
+      device.addEventListener("gattserverdisconnected", handleDisconnect);
       await notifyCharacteristic.startNotifications();
 
       return {
@@ -315,6 +323,8 @@ export async function requestHardwareConnection(
           throw new Error(browserCopy("小车蓝牙写入通道不可用", "The vehicle Bluetooth write channel is unavailable"));
         },
         close: async () => {
+          closed = true;
+          device.removeEventListener("gattserverdisconnected", handleDisconnect);
           if (handleNotification) {
             notifyCharacteristic?.removeEventListener("characteristicvaluechanged", handleNotification);
           }
@@ -324,6 +334,8 @@ export async function requestHardwareConnection(
         },
       };
     } catch (error) {
+      closed = true;
+      device.removeEventListener("gattserverdisconnected", handleDisconnect);
       server?.disconnect();
       device.gatt.disconnect();
       if (error instanceof DOMException && error.name === "NotFoundError") {

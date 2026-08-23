@@ -156,6 +156,7 @@ export interface HardwareTemplateRecord {
 }
 
 let activeWorkspaceId = "";
+let debugWriteQueue: Promise<void> = Promise.resolve();
 
 export function configureWorkspace(workspaceId: string) {
   activeWorkspaceId = workspaceId;
@@ -179,10 +180,18 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+function enqueueDebugWrite(operation: () => Promise<void>): Promise<void> {
+  const result = debugWriteQueue.then(operation, operation);
+  debugWriteQueue = result.catch(() => undefined);
+  return result;
+}
+
 export async function saveSession(session: DebugSessionRecord): Promise<void> {
-  await requestJson(`/api/sessions/${session.id}`, {
-    method: "PUT",
-    body: JSON.stringify({ ...session, workspaceId: workspaceId() }),
+  await enqueueDebugWrite(async () => {
+    await requestJson(`/api/sessions/${session.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...session, workspaceId: workspaceId() }),
+    });
   });
 }
 
@@ -194,9 +203,11 @@ export async function listSessions(): Promise<DebugSessionRecord[]> {
 }
 
 export async function saveEvent(event: DebugEventRecord): Promise<void> {
-  await requestJson(`/api/sessions/${event.sessionId}/events`, {
-    method: "POST",
-    body: JSON.stringify(event),
+  await enqueueDebugWrite(async () => {
+    await requestJson(`/api/sessions/${event.sessionId}/events`, {
+      method: "POST",
+      body: JSON.stringify(event),
+    });
   });
 }
 

@@ -26,18 +26,32 @@ class MockCharacteristic extends EventTarget {
   }
 }
 
+class MockBluetoothDevice extends EventTarget {
+  id = "ecb02-test";
+  name = "ECB02";
+  gatt;
+
+  constructor(gatt: {
+    connected: boolean;
+    connect(): Promise<unknown>;
+    disconnect(): void;
+  }) {
+    super();
+    this.gatt = gatt;
+  }
+}
+
 test("connects the ECB02 GATT data channel and forwards notifications", async () => {
   const notify = new MockCharacteristic();
   const write = new MockCharacteristic();
   let requestedOptions: unknown;
   let disconnected = false;
+  let disconnectEvents = 0;
+  let device: MockBluetoothDevice;
   const bluetooth = {
     async requestDevice(options: unknown) {
       requestedOptions = options;
-      return {
-        id: "ecb02-test",
-        name: "ECB02",
-        gatt: {
+      device = new MockBluetoothDevice({
           connected: false,
           async connect() {
             return {
@@ -56,8 +70,8 @@ test("connects the ECB02 GATT data channel and forwards notifications", async ()
             };
           },
           disconnect() { disconnected = true; },
-        },
-      };
+      });
+      return device;
     },
   };
   Object.defineProperty(globalThis, "navigator", {
@@ -68,6 +82,7 @@ test("connects the ECB02 GATT data channel and forwards notifications", async ()
   const received: string[] = [];
   const connection = await requestHardwareConnection("bluetooth", {
     onSerialText: (text) => received.push(text),
+    onDisconnect: () => { disconnectEvents += 1; },
   });
 
   assert.deepEqual(requestedOptions, { acceptAllDevices: true, optionalServices: [0xfff0] });
@@ -89,7 +104,11 @@ test("connects the ECB02 GATT data channel and forwards notifications", async ()
   assert.deepEqual(raw, [[0, 255, 17]]);
   assert.deepEqual(received, ["STMWEB_CAPS:{}\r\n"]);
   connection.setDataHandler?.(null);
+  device!.dispatchEvent(new Event("gattserverdisconnected"));
+  assert.equal(disconnectEvents, 1);
   await connection.close();
+  device!.dispatchEvent(new Event("gattserverdisconnected"));
+  assert.equal(disconnectEvents, 1);
   assert.equal(notify.notificationsStopped, true);
   assert.equal(disconnected, true);
 });

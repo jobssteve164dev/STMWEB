@@ -170,6 +170,7 @@ router.put("/jobs/:jobId/artifacts/:name", express.raw({ type: "application/octe
 
 router.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof z.ZodError) { response.status(400).json({ error: "Runner 提交的数据格式不正确" }); return; }
+  console.error("Runner API request failed", error);
   response.status(500).json({ error: "编译算力服务暂时不可用" });
 });
 

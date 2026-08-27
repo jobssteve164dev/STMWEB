@@ -28,9 +28,29 @@ CONTAINER_ID=$(docker create --platform linux/amd64 --entrypoint sh "$IMAGE" -c 
     cmake --build "$output" --parallel 1
     node /source/verify-dot-initial-firmware.mjs "$output" "$target"
   done
+  for mode in bluetooth wired; do
+    output="/tmp/stmweb-composition-$mode"
+    composition="/source/dot-composition-$mode.json"
+    cmake -S /opt/stmweb/adapters/dot-v1 -B "$output" -G Ninja \
+      -DSTMWEB_TARGET=stm32f103c8 \
+      -DSTMWEB_SOURCE_ROOT=/source/smoke-source \
+      -DSTMWEB_COMPOSITION_FILE="$composition"
+    cmake --build "$output" --parallel 1
+    node -e "const fs=require(\"fs\");const a=JSON.parse(fs.readFileSync(\"$composition\"));const m=JSON.parse(fs.readFileSync(\"$output/stmweb_firmware_manifest.json\"));if(JSON.stringify(a)!==JSON.stringify(m.composition)||JSON.stringify(a.runtimeTransports)!==JSON.stringify(m.runtime.transports))process.exit(1)"
+    if [ "$mode" = bluetooth ]; then
+      arm-none-eabi-nm "$output/dot_v1.elf" | grep -q legacy_communication
+    else
+      if arm-none-eabi-nm "$output/dot_v1.elf" | grep -q legacy_communication; then
+        echo "wired-only firmware still contains the bluetooth update bridge" >&2
+        exit 1
+      fi
+    fi
+  done
 ')
 docker cp "$SOURCE_ROOT/." "$CONTAINER_ID:/source/smoke-source"
 docker cp "$REPOSITORY_ROOT/scripts/verify-dot-initial-firmware.mjs" "$CONTAINER_ID:/source/verify-dot-initial-firmware.mjs"
+docker cp "$REPOSITORY_ROOT/tests/fixtures/dot-composition-bluetooth.json" "$CONTAINER_ID:/source/dot-composition-bluetooth.json"
+docker cp "$REPOSITORY_ROOT/tests/fixtures/dot-composition-wired.json" "$CONTAINER_ID:/source/dot-composition-wired.json"
 docker start --attach "$CONTAINER_ID"
 docker container rm "$CONTAINER_ID" >/dev/null
 CONTAINER_ID=""

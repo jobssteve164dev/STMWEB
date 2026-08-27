@@ -154,14 +154,13 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal(firmwareContent.status, 200);
     assert.deepEqual(Buffer.from(await firmwareContent.arrayBuffer()), firmwareBytes);
 
-    const firmwareConfiguration = {
-      schemaVersion: 1 as const,
-      foundationModules: ["platform.boot-recovery", "platform.device-identity", "platform.debug-safety"],
-      capabilityModules: ["capability.motor-control", "capability.battery", "capability.tuning", "capability.telemetry"],
-      connectionModules: ["connection.swd", "connection.bluetooth"],
-      flashMethods: ["swd", "bluetooth"],
-    };
-    const configurationPayload = Buffer.from(`STMWEB_CONFIG:${JSON.stringify(firmwareConfiguration)}`);
+    const { getFirmwareAdapterTarget, resolveFirmwareConfiguration } = await import("../server/firmware-adapter-registry.js");
+    const registeredAdapter = getFirmwareAdapterTarget("stmweb.dot-v1", "1", "stm32f103c8");
+    assert.ok(registeredAdapter);
+    const firmwareConfiguration = resolveFirmwareConfiguration(registeredAdapter.adapter, registeredAdapter.target, [
+      "capability.motor-control", "capability.battery", "capability.tuning", "capability.telemetry", "connection.swd", "connection.bluetooth",
+    ]);
+    const configurationPayload = Buffer.from(`STMWEB_COMPOSITION:${JSON.stringify(firmwareConfiguration)}`);
     const generatedApplicationBytes = Buffer.concat([firmwareBytes, configurationPayload, Buffer.from([0])]);
     const completeBytes = embedHexPayload(
       readFileSync("public/firmware/dot-v1/dot_v1_compact_initial_swd.hex"),

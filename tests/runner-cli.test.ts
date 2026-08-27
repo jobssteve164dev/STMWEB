@@ -12,9 +12,9 @@ test("runner doctor reports its immutable build capability contract", () => {
     version: string;
     capabilities: { architecture: string; firmwareCompositionVersion: number; maxConcurrentBuilds: number; toolchains: Array<{ id: string; targets: string[] }> };
   };
-  assert.equal(report.version, "0.2.0");
+  assert.equal(report.version, "0.3.0");
   assert.equal(report.capabilities.architecture, process.arch);
-  assert.equal(report.capabilities.firmwareCompositionVersion, 1);
+  assert.equal(report.capabilities.firmwareCompositionVersion, 2);
   assert.equal(report.capabilities.maxConcurrentBuilds, 1);
   assert.equal(report.capabilities.toolchains[0]?.id, "arm-none-eabi-gcc");
   assert.ok(Array.isArray(report.capabilities.toolchains[0]?.targets));

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,13 +6,21 @@ import { z } from "zod";
 
 const flashMethodSchema = z.enum(["swd", "bluetooth"]);
 const localizedTextSchema = z.object({ zh: z.string().min(1), en: z.string().min(1) });
+const portSchema = z.object({ port: z.string().min(1), version: z.string().min(1) });
+const requiredPortSchema = portSchema.extend({ count: z.number().int().positive().default(1) });
+const resourceRequirementSchema = z.object({ kind: z.string().min(1), role: z.string().min(1), exclusive: z.boolean().default(true) });
 const moduleBaseSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9.-]*$/),
+  version: z.string().min(1).default("1"),
   label: localizedTextSchema,
   description: localizedTextSchema,
   targets: z.array(z.string().min(1)).optional(),
   requires: z.array(z.string().min(1)).default([]),
   conflicts: z.array(z.string().min(1)).default([]),
+  provides: z.array(portSchema).default([]),
+  requiresPorts: z.array(requiredPortSchema).default([]),
+  resources: z.array(resourceRequirementSchema).default([]),
+  buildFeatures: z.array(z.string().regex(/^[a-z0-9][a-z0-9.-]*$/)).default([]),
 });
 const foundationModuleSchema = moduleBaseSchema.extend({ kind: z.literal("foundation") });
 const capabilityModuleSchema = moduleBaseSchema.extend({ kind: z.literal("capability"), defaultEnabled: z.boolean() });
@@ -20,6 +29,7 @@ const connectionModuleSchema = moduleBaseSchema.extend({
   defaultEnabled: z.boolean(),
   required: z.boolean(),
   flashMethod: flashMethodSchema,
+  runtimeTransport: z.string().min(1),
 });
 const artifactSchema = z.object({
   buildFile: z.string().min(1),
@@ -39,6 +49,12 @@ const targetSchema = z.object({
   bootloaderLinkerScript: z.string().min(1),
   deviceDefine: z.string().min(1),
   compactRuntime: z.boolean(),
+  resources: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.string().min(1),
+    label: z.string().min(1),
+    shareable: z.boolean().default(false),
+  })).default([]),
   artifacts: z.array(artifactSchema).length(2),
 });
 const adapterSchema = z.object({
@@ -65,13 +81,38 @@ const adapterSchema = z.object({
 export type FirmwareAdapter = z.infer<typeof adapterSchema>;
 export type FirmwareAdapterTarget = z.infer<typeof targetSchema>;
 export type FirmwareModule = z.infer<typeof foundationModuleSchema> | z.infer<typeof capabilityModuleSchema> | z.infer<typeof connectionModuleSchema>;
-export interface FirmwareConfiguration {
-  schemaVersion: 1;
-  foundationModules: string[];
-  capabilityModules: string[];
-  connectionModules: string[];
-  flashMethods: Array<z.infer<typeof flashMethodSchema>>;
-}
+const resolvedComponentSchema = z.object({
+  id: z.string(),
+  version: z.string(),
+  kind: z.enum(["foundation", "capability", "connection"]),
+  provides: z.array(portSchema),
+  requires: z.array(requiredPortSchema),
+  buildFeatures: z.array(z.string()),
+});
+const portBindingSchema = z.object({
+  consumerId: z.string(),
+  requiredPort: z.string(),
+  providerId: z.string(),
+  providedPort: z.string(),
+  version: z.string(),
+});
+const resourceBindingSchema = z.object({ componentId: z.string(), role: z.string(), resourceId: z.string(), kind: z.string() });
+
+export const firmwareCompositionSchema = z.object({
+  schemaVersion: z.literal(2),
+  foundationModules: z.array(z.string()),
+  capabilityModules: z.array(z.string()),
+  connectionModules: z.array(z.string()),
+  flashMethods: z.array(flashMethodSchema).min(1),
+  runtimeTransports: z.array(z.string()).min(1),
+  components: z.array(resolvedComponentSchema).min(1),
+  portBindings: z.array(portBindingSchema),
+  resourceBindings: z.array(resourceBindingSchema),
+  buildFeatures: z.array(z.string()),
+  compositionSha256: z.string().regex(/^[a-f0-9]{64}$/),
+});
+
+export type FirmwareConfiguration = z.infer<typeof firmwareCompositionSchema>;
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const adapterRoot = path.join(repositoryRoot, "firmware-adapters");
@@ -103,6 +144,17 @@ const adapters = loadFirmwareAdapters();
 
 function supportsTarget(module: FirmwareModule, targetId: string): boolean {
   return !module.targets || module.targets.includes(targetId);
+}
+
+function compositionSha256(composition: Omit<FirmwareConfiguration, "compositionSha256">): string {
+  return createHash("sha256").update(JSON.stringify(composition)).digest("hex");
+}
+
+export function verifyFirmwareComposition(value: unknown): FirmwareConfiguration {
+  const composition = firmwareCompositionSchema.parse(value);
+  const { compositionSha256: declared, ...content } = composition;
+  if (compositionSha256(content) !== declared) throw new Error("固件组合图摘要无效");
+  return composition;
 }
 
 export function resolveFirmwareConfiguration(
@@ -138,7 +190,59 @@ export function resolveFirmwareConfiguration(
   const capabilities = adapter.modules.capabilities.filter((module) => selected.has(module.id)).map((module) => module.id);
   const connections = adapter.modules.connections.filter((module) => selected.has(module.id)).map((module) => module.id);
   const flashMethods = adapter.modules.connections.filter((module) => selected.has(module.id)).map((module) => module.flashMethod);
-  return { schemaVersion: 1, foundationModules: foundations, capabilityModules: capabilities, connectionModules: connections, flashMethods: [...new Set(flashMethods)] };
+  const runtimeTransports = adapter.modules.connections.filter((module) => selected.has(module.id)).map((module) => module.runtimeTransport);
+  const resolvedModules = available.filter((module) => module.kind === "foundation" || selected.has(module.id));
+  const portBindings: Array<z.infer<typeof portBindingSchema>> = [];
+  for (const consumer of resolvedModules) {
+    for (const requirement of consumer.requiresPorts) {
+      const providers = resolvedModules.filter((provider) => provider.provides.some((provided) => provided.port === requirement.port && provided.version === requirement.version));
+      if (providers.length < requirement.count) {
+        throw new Error(`${consumer.label.zh} 缺少当前硬件可用的“${requirement.port}”实现`);
+      }
+      for (const provider of providers.slice(0, requirement.count)) {
+        portBindings.push({
+          consumerId: consumer.id,
+          requiredPort: requirement.port,
+          providerId: provider.id,
+          providedPort: requirement.port,
+          version: requirement.version,
+        });
+      }
+    }
+  }
+  const resourceBindings: Array<z.infer<typeof resourceBindingSchema>> = [];
+  const exclusivelyUsed = new Set<string>();
+  for (const component of resolvedModules) {
+    for (const requirement of component.resources) {
+      const resource = target.resources.find((candidate) => candidate.kind === requirement.kind
+        && (!requirement.exclusive || candidate.shareable || !exclusivelyUsed.has(candidate.id)));
+      if (!resource) throw new Error(`${component.label.zh} 缺少当前硬件可用的“${requirement.role}”资源`);
+      if (requirement.exclusive && !resource.shareable) exclusivelyUsed.add(resource.id);
+      resourceBindings.push({ componentId: component.id, role: requirement.role, resourceId: resource.id, kind: resource.kind });
+    }
+  }
+  const components = resolvedModules.map((module) => ({
+    id: module.id,
+    version: module.version,
+    kind: module.kind,
+    provides: module.provides,
+    requires: module.requiresPorts,
+    buildFeatures: module.buildFeatures,
+  }));
+  const buildFeatures = [...new Set(resolvedModules.flatMap((module) => module.buildFeatures))];
+  const content = {
+    schemaVersion: 2 as const,
+    foundationModules: foundations,
+    capabilityModules: capabilities,
+    connectionModules: connections,
+    flashMethods: [...new Set(flashMethods)],
+    runtimeTransports: [...new Set(runtimeTransports)],
+    components,
+    portBindings,
+    resourceBindings,
+    buildFeatures,
+  };
+  return { ...content, compositionSha256: compositionSha256(content) };
 }
 
 export function listFirmwareAdapterTargets() {

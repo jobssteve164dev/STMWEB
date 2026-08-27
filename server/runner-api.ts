@@ -13,7 +13,7 @@ const capabilitiesSchema = z.object({
   backend: z.string().max(64),
   environmentVersion: z.string().max(120),
   maxConcurrentBuilds: z.number().int().min(1).max(4).default(1),
-  firmwareCompositionVersion: z.literal(1).optional(),
+  firmwareCompositionVersion: z.literal(2).optional(),
   toolchains: z.array(z.object({ id: z.string().max(80), version: z.string().max(80), targets: z.array(z.string().max(80)).max(32) })).max(16),
   diskFreeMb: z.number().int().min(0).optional(),
 });
@@ -89,7 +89,7 @@ router.post("/jobs/lease", asyncRoute(async (request, response) => {
               j.firmware_configuration AS "firmwareConfiguration"
        FROM build_jobs j JOIN hardware_projects p ON p.id=j.hardware_project_id
        WHERE j.runner_id=$1 AND j.status='queued' AND j.desired_state='running'
-         AND EXISTS (SELECT 1 FROM build_runners r WHERE r.id=$1 AND r.capabilities->>'firmwareCompositionVersion'='1')
+         AND EXISTS (SELECT 1 FROM build_runners r WHERE r.id=$1 AND r.capabilities->>'firmwareCompositionVersion'='2')
        ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,
       [runner.id],
     );

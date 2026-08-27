@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "foundationModules": ["platform.boot-recovery", "platform.device-identity", "platform.debug-safety"],
+  "capabilityModules": ["capability.motor-control", "capability.battery", "capability.tuning", "capability.telemetry"],
+  "connectionModules": ["connection.swd"],
+  "flashMethods": ["swd"],
+  "runtimeTransports": ["swd"],
+  "components": [
+    { "id": "platform.boot-recovery", "version": "1", "kind": "foundation", "provides": [{ "port": "platform.recovery", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "platform.device-identity", "version": "1", "kind": "foundation", "provides": [{ "port": "platform.identity", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "platform.debug-safety", "version": "1", "kind": "foundation", "provides": [{ "port": "platform.safe-stop", "version": "1" }, { "port": "platform.capability-discovery", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "capability.motor-control", "version": "1", "kind": "capability", "provides": [{ "port": "control.motor", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "capability.battery", "version": "1", "kind": "capability", "provides": [{ "port": "state.battery", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "capability.tuning", "version": "1", "kind": "capability", "provides": [], "requires": [{ "port": "control.motor", "version": "1", "count": 1 }], "buildFeatures": [] },
+    { "id": "capability.telemetry", "version": "1", "kind": "capability", "provides": [{ "port": "telemetry.stream", "version": "1" }], "requires": [], "buildFeatures": [] },
+    { "id": "connection.swd", "version": "1", "kind": "connection", "provides": [{ "port": "firmware.flash.swd", "version": "1" }], "requires": [], "buildFeatures": [] }
+  ],
+  "portBindings": [{ "consumerId": "capability.tuning", "requiredPort": "control.motor", "providerId": "capability.motor-control", "providedPort": "control.motor", "version": "1" }],
+  "resourceBindings": [],
+  "buildFeatures": [],
+  "compositionSha256": "c226e17705033288a9dff18bdd0f7cf123464db1ace2a18e504d59fd951a278d"
+}

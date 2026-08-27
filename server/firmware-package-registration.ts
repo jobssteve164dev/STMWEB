@@ -1,16 +1,8 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { z } from "zod";
-import { getFirmwareAdapterTarget } from "./firmware-adapter-registry.js";
+import { firmwareCompositionSchema, getFirmwareAdapterTarget, resolveFirmwareConfiguration, verifyFirmwareComposition } from "./firmware-adapter-registry.js";
 import { firmwareContainsPayload, inspectFirmwareArtifact } from "./firmware-artifact.js";
-
-const firmwareConfigurationSchema = z.object({
-  schemaVersion: z.literal(1),
-  foundationModules: z.array(z.string()),
-  capabilityModules: z.array(z.string()),
-  connectionModules: z.array(z.string()),
-  flashMethods: z.array(z.enum(["swd", "bluetooth"])).min(1),
-});
 
 const manifestArtifactSchema = z.object({
   buildFile: z.string().min(1),
@@ -30,7 +22,7 @@ const generatedManifestSchema = z.object({
   validation: z.object({ status: z.literal("verified"), checks: z.array(z.string()).min(1) }),
   source: z.object({ name: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
   build: z.object({ profile: z.string(), target: z.string(), environmentVersion: z.string() }),
-  composition: firmwareConfigurationSchema,
+  composition: firmwareCompositionSchema,
 });
 
 interface BuildArtifactRow {
@@ -61,7 +53,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   if (!registered || registered.adapter.runtimeVersion !== job.runtimeVersion || registered.adapter.buildProfile !== job.profile) {
     throw new Error("构建使用的硬件适配版本已不可用");
   }
-  const firmwareConfiguration = firmwareConfigurationSchema.parse(job.firmwareConfiguration);
+  const firmwareConfiguration = verifyFirmwareComposition(job.firmwareConfiguration);
 
   const artifactResult = await client.query<BuildArtifactRow>(
     `SELECT name,kind,sha256,size::text,content FROM build_artifacts WHERE job_id=$1`,
@@ -72,13 +64,20 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   if (!manifestArtifact || manifestArtifact.kind !== "report") throw new Error("Runner 没有提交标准固件清单");
   const manifest = generatedManifestSchema.parse(JSON.parse(manifestArtifact.content.toString("utf8")));
   const { adapter, target } = registered;
+  const expectedComposition = resolveFirmwareConfiguration(adapter, target, [
+    ...firmwareConfiguration.capabilityModules,
+    ...firmwareConfiguration.connectionModules,
+  ]);
+  if (JSON.stringify(expectedComposition) !== JSON.stringify(firmwareConfiguration)) {
+    throw new Error("构建任务中的解析后组合图与硬件适配不一致");
+  }
   if (manifest.adapter.id !== adapter.adapterId || manifest.adapter.version !== adapter.adapterVersion
     || manifest.hardware.profileId !== adapter.adapterId || manifest.hardware.revision !== adapter.adapterVersion
     || manifest.hardware.target !== target.id || manifest.hardware.mcuFamily !== target.mcuFamily
     || manifest.hardware.deviceIds.join(",") !== target.deviceIds.join(",")
     || manifest.hardware.flashBytes !== target.flashSize || manifest.runtime.version !== adapter.runtimeVersion
     || manifest.runtime.debugProtocol !== adapter.runtime.debugProtocol || manifest.runtime.bootProtocol !== adapter.runtime.bootProtocol
-    || manifest.runtime.transports.join(",") !== adapter.runtime.transports.join(",")
+    || manifest.runtime.transports.join(",") !== firmwareConfiguration.runtimeTransports.join(",")
     || manifest.memory.applicationBase !== target.applicationBase || manifest.memory.applicationLimit !== target.applicationLimit
     || manifest.source.sha256 !== job.sourceSha256 || manifest.source.name !== job.sourceName
     || manifest.build.profile !== job.profile || manifest.build.target !== job.target
@@ -102,9 +101,9 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     if (Number(artifact.size) !== descriptor.size || artifact.sha256 !== descriptor.sha256 || actualSha256 !== descriptor.sha256) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
     }
-    const configurationPayload = new TextEncoder().encode(`STMWEB_CONFIG:${JSON.stringify(firmwareConfiguration)}`);
+    const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(firmwareConfiguration)}`);
     if (!firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload)) {
-      throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含当前模块配置`);
+      throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含本次固件组合身份`);
     }
     const inspected = inspectFirmwareArtifact(artifact.content, descriptor.buildFile, {
       hardwareProfileId: adapter.adapterId, adapterVersion: adapter.adapterVersion, target: target.id,

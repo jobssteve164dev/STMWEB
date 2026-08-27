@@ -17,19 +17,25 @@
         "id": "platform.boot-recovery",
         "kind": "foundation",
         "label": { "zh": "启动与恢复", "en": "Boot & recovery" },
-        "description": { "zh": "自动提供可靠启动、升级入口和失败恢复。", "en": "Provides reliable boot, update entry and failure recovery." }
+        "description": { "zh": "自动提供可靠启动、升级入口和失败恢复。", "en": "Provides reliable boot, update entry and failure recovery." },
+        "provides": [{ "port": "platform.recovery", "version": "1" }]
       },
       {
         "id": "platform.device-identity",
         "kind": "foundation",
         "label": { "zh": "设备身份", "en": "Device identity" },
-        "description": { "zh": "写入硬件适配与固件身份，供连接和烧录时自动核对。", "en": "Embeds hardware and firmware identity for automatic connection and flashing checks." }
+        "description": { "zh": "写入硬件适配与固件身份，供连接和烧录时自动核对。", "en": "Embeds hardware and firmware identity for automatic connection and flashing checks." },
+        "provides": [{ "port": "platform.identity", "version": "1" }]
       },
       {
         "id": "platform.debug-safety",
         "kind": "foundation",
         "label": { "zh": "调试与安全", "en": "Debug & safety" },
-        "description": { "zh": "提供能力发现、安全停止、完整性校验和重启确认。", "en": "Provides capability discovery, safe stop, integrity checks and restart confirmation." }
+        "description": { "zh": "提供能力发现、安全停止、完整性校验和重启确认。", "en": "Provides capability discovery, safe stop, integrity checks and restart confirmation." },
+        "provides": [
+          { "port": "platform.safe-stop", "version": "1" },
+          { "port": "platform.capability-discovery", "version": "1" }
+        ]
       }
     ],
     "capabilities": [
@@ -38,14 +44,16 @@
         "kind": "capability",
         "label": { "zh": "电机控制", "en": "Motor control" },
         "description": { "zh": "控制双电机输出并读取运行状态。", "en": "Controls dual motor output and reads its live state." },
-        "defaultEnabled": true
+        "defaultEnabled": true,
+        "provides": [{ "port": "control.motor", "version": "1" }]
       },
       {
         "id": "capability.battery",
         "kind": "capability",
         "label": { "zh": "电池状态", "en": "Battery status" },
         "description": { "zh": "读取电池电压并提供低电量状态。", "en": "Reads battery voltage and exposes low-power state." },
-        "defaultEnabled": true
+        "defaultEnabled": true,
+        "provides": [{ "port": "state.battery", "version": "1" }]
       },
       {
         "id": "capability.tuning",
@@ -53,14 +61,16 @@
         "label": { "zh": "参数调节", "en": "Parameter tuning" },
         "description": { "zh": "在调试台调整平衡与速度参数。", "en": "Tunes balance and speed parameters from the workbench." },
         "defaultEnabled": true,
-        "requires": ["capability.motor-control"]
+        "requires": ["capability.motor-control"],
+        "requiresPorts": [{ "port": "control.motor", "version": "1", "count": 1 }]
       },
       {
         "id": "capability.telemetry",
         "kind": "capability",
         "label": { "zh": "实时遥测", "en": "Live telemetry" },
         "description": { "zh": "连续查看电机、电池和控制数据曲线。", "en": "Streams motor, battery and control data charts." },
-        "defaultEnabled": true
+        "defaultEnabled": true,
+        "provides": [{ "port": "telemetry.stream", "version": "1" }]
       }
     ],
     "connections": [
@@ -71,7 +81,9 @@
         "description": { "zh": "用于安装、更新和恢复，始终保留。", "en": "Always available for installation, updates and recovery." },
         "defaultEnabled": true,
         "required": true,
-        "flashMethod": "swd"
+        "flashMethod": "swd",
+        "runtimeTransport": "swd",
+        "provides": [{ "port": "firmware.flash.swd", "version": "1" }]
       },
       {
         "id": "connection.bluetooth",
@@ -80,7 +92,12 @@
         "description": { "zh": "保留 Bootloader，通过近距离蓝牙更新应用。", "en": "Keeps the Bootloader and updates the application over nearby Bluetooth." },
         "defaultEnabled": true,
         "required": false,
-        "flashMethod": "bluetooth"
+        "flashMethod": "bluetooth",
+        "runtimeTransport": "bluetooth-uart",
+        "provides": [{ "port": "firmware.update.application", "version": "1" }],
+        "requiresPorts": [{ "port": "platform.safe-stop", "version": "1", "count": 1 }],
+        "resources": [{ "kind": "uart", "role": "蓝牙连接", "exclusive": true }],
+        "buildFeatures": ["dot.bluetooth-update"]
       }
     ]
   },
@@ -97,6 +114,9 @@
       "bootloaderLinkerScript": "stm32f103c8_bootloader.ld",
       "deviceDefine": "STM32F10X_MD",
       "compactRuntime": true,
+      "resources": [
+        { "id": "board.usart3", "kind": "uart", "label": "USART3 · PB10/PB11", "shareable": false }
+      ],
       "artifacts": [
         {
           "buildFile": "dot_v1_initial_swd.hex",
@@ -124,6 +144,9 @@
       "bootloaderLinkerScript": "stm32f103cb_bootloader.ld",
       "deviceDefine": "STM32F10X_HD",
       "compactRuntime": false,
+      "resources": [
+        { "id": "board.usart3", "kind": "uart", "label": "USART3 · PB10/PB11", "shareable": false }
+      ],
       "artifacts": [
         {
           "buildFile": "dot_v1_initial_swd.hex",

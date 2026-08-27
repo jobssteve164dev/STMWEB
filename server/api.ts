@@ -201,7 +201,10 @@ router.get("/workspaces/:workspaceId/hardware-projects", asyncRoute(async (reque
     const selected = saved && Array.isArray(saved.capabilityModules) && Array.isArray(saved.connectionModules)
       ? [...saved.capabilityModules, ...saved.connectionModules].filter((item): item is string => typeof item === "string")
       : undefined;
-    return { ...project, firmwareConfiguration: registered ? resolveFirmwareConfiguration(registered.adapter, registered.target, selected) : { schemaVersion: 1, foundationModules: [], capabilityModules: [], connectionModules: [], flashMethods: [] } };
+    return { ...project, firmwareConfiguration: registered ? resolveFirmwareConfiguration(registered.adapter, registered.target, selected) : {
+      schemaVersion: 2, foundationModules: [], capabilityModules: [], connectionModules: [], flashMethods: [], runtimeTransports: [], components: [],
+      portBindings: [], resourceBindings: [], buildFeatures: [], compositionSha256: "",
+    } };
   }) });
 }));
 
@@ -573,7 +576,7 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   const runner = await pool.query(
     `SELECT id FROM build_runners
      WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'
-       AND capabilities->>'firmwareCompositionVersion'='1'`,
+       AND capabilities->>'firmwareCompositionVersion'='2'`,
     [input.runnerId,workspaceId],
   );
   if (!runner.rowCount) { response.status(409).json({ error: "请选择已更新且在线的编译算力" }); return; }

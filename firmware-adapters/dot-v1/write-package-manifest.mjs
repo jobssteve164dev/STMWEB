@@ -4,6 +4,7 @@ import path from "node:path";
 
 const buildDirectory = path.resolve(process.argv[2]);
 const targetId = process.argv[3];
+const compositionFile = process.argv[4];
 const adapter = JSON.parse(readFileSync(new URL("./adapter.json", import.meta.url), "utf8"));
 const target = adapter.targets.find((candidate) => candidate.id === targetId);
 if (!target) throw new Error(`unsupported adapter target: ${targetId}`);
@@ -33,5 +34,10 @@ const manifest = {
   artifacts,
   validation: { status: "verified", checks: ["vectors", "layout", "capacity", "factory-metadata", "sha256"] },
 };
+
+if (compositionFile) {
+  manifest.composition = JSON.parse(readFileSync(compositionFile, "utf8"));
+  manifest.runtime.transports = manifest.composition.runtimeTransports;
+}
 
 writeFileSync(path.join(buildDirectory, "stmweb_firmware_manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

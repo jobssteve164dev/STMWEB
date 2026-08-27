@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:f
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
 const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.1.0";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
@@ -60,7 +60,7 @@ function capabilities() {
     architecture: process.arch,
     backend: docker.status === 0 && imageReady() ? "docker" : "unavailable",
     environmentVersion: BUILD_IMAGE,
-    firmwareCompositionVersion: 1,
+    firmwareCompositionVersion: 2,
     maxConcurrentBuilds: 1,
     diskFreeMb,
     toolchains: [{ id: "arm-none-eabi-gcc", version: "container-pinned", targets: supportedAdapterTargets().map((item) => item.target) }],
@@ -154,22 +154,34 @@ async function uploadArtifact(state, job, file, kind) {
 }
 
 function canonicalFirmwareConfiguration(value) {
-  if (!value || value.schemaVersion !== 1) throw new Error("构建任务缺少有效的固件模块配置");
-  const fields = ["foundationModules", "capabilityModules", "connectionModules", "flashMethods"];
+  if (!value || value.schemaVersion !== 2) throw new Error("构建任务缺少有效的固件组合图");
+  const fields = ["foundationModules", "capabilityModules", "connectionModules", "flashMethods", "runtimeTransports"];
   if (fields.some((field) => !Array.isArray(value[field]) || value[field].some((item) => typeof item !== "string"))) {
-    throw new Error("构建任务中的固件模块配置格式无效");
+    throw new Error("构建任务中的固件组合图格式无效");
   }
-  return {
-    schemaVersion: 1,
+  if (!Array.isArray(value.components) || !Array.isArray(value.portBindings) || !Array.isArray(value.resourceBindings)
+    || !Array.isArray(value.buildFeatures) || value.buildFeatures.some((item) => typeof item !== "string")) {
+    throw new Error("构建任务中的固件组合解析结果无效");
+  }
+  const content = {
+    schemaVersion: 2,
     foundationModules: [...value.foundationModules],
     capabilityModules: [...value.capabilityModules],
     connectionModules: [...value.connectionModules],
     flashMethods: [...value.flashMethods],
+    runtimeTransports: [...value.runtimeTransports],
+    components: structuredClone(value.components),
+    portBindings: structuredClone(value.portBindings),
+    resourceBindings: structuredClone(value.resourceBindings),
+    buildFeatures: [...value.buildFeatures],
   };
+  const digest = sha256(JSON.stringify(content));
+  if (value.compositionSha256 !== digest) throw new Error("构建任务中的固件组合图摘要无效");
+  return { ...content, compositionSha256: digest };
 }
 
 function firmwareConfigurationSource(configuration) {
-  const marker = Buffer.from(`STMWEB_CONFIG:${JSON.stringify(configuration)}\0`, "utf8");
+  const marker = Buffer.from(`STMWEB_COMPOSITION:${JSON.stringify(configuration)}\0`, "utf8");
   const values = [...marker].map((value) => `0x${value.toString(16).padStart(2, "0")}`).join(",");
   return `#include <stdint.h>\n__attribute__((used,section(".stmweb_config"))) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
 }
@@ -190,7 +202,9 @@ async function execute(stateDir, state, job) {
   try {
     await mkdir(source); await mkdir(output);
     const configurationSource = path.join(output, "stmweb_firmware_configuration.c");
+    const compositionFile = path.join(output, "stmweb_firmware_composition.json");
     await writeFile(configurationSource, firmwareConfigurationSource(firmwareConfiguration), { mode: 0o600 });
+    await writeFile(compositionFile, `${JSON.stringify(firmwareConfiguration)}\n`, { mode: 0o600 });
     const bytes = await request(state, job.sourceUrl);
     if (sha256(bytes) !== job.sourceSha256) throw new Error("源码包摘要不匹配");
     await writeFile(archive, bytes, { mode: 0o600 });
@@ -225,7 +239,7 @@ async function execute(stateDir, state, job) {
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
       BUILD_IMAGE, "sh", "-lc",
-      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c${sourceOptions} && cmake --build /output/build --parallel 1`,
+      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} && cmake --build /output/build --parallel 1`,
     ];
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     const log = [];
@@ -263,15 +277,15 @@ async function execute(stateDir, state, job) {
     const generatedManifest = JSON.parse(await readFile(generatedManifestFile, "utf8"));
     if (generatedManifest.schemaVersion !== 1 || generatedManifest.adapter?.id !== job.hardwareProfileId
       || generatedManifest.adapter?.version !== job.adapterVersion || generatedManifest.runtime?.version !== job.runtimeVersion
-      || generatedManifest.hardware?.target !== job.target || !Array.isArray(generatedManifest.artifacts)) {
+      || generatedManifest.hardware?.target !== job.target || !Array.isArray(generatedManifest.artifacts)
+      || JSON.stringify(generatedManifest.composition) !== JSON.stringify(firmwareConfiguration)) {
       throw new Error("构建结果没有形成匹配硬件项目的标准固件包");
     }
     generatedManifest.source = { name: job.sourceName, sha256: job.sourceSha256 };
     generatedManifest.build = { profile: job.profile, target: job.target, environmentVersion: BUILD_IMAGE };
-    generatedManifest.composition = firmwareConfiguration;
     for (const artifact of generatedManifest.artifacts) {
       artifact.flashMethods = artifact.flashMethods.filter((method) => firmwareConfiguration.flashMethods.includes(method));
-      if (!artifact.flashMethods.length) throw new Error(`固件模块配置没有为 ${artifact.role} 保留可用烧录方式`);
+      if (!artifact.flashMethods.length) throw new Error(`当前固件组合没有为 ${artifact.role} 保留可用烧录方式`);
     }
     const finalManifestFile = path.join(output, "firmware-manifest.json");
     await writeFile(finalManifestFile, `${JSON.stringify(generatedManifest, null, 2)}\n`);

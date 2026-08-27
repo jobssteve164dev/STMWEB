@@ -153,8 +153,8 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
     finally { setBusy(false); }
   }
 
-  const available = runners.filter((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion === 1);
-  const needsUpdate = runners.some((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion !== 1);
+  const available = runners.filter((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion === 2);
+  const needsUpdate = runners.some((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion !== 2);
   return (
     <article className="workbench-card build-runner-widget">
       <div className="widget-heading"><div><CloudCog size={18} /><strong>{c("标准固件生成", "Standard Firmware Generation")}</strong></div><button type="button" aria-label={c("刷新生成状态", "Refresh generation status")} onClick={() => void refresh()}><RefreshCw size={16} /></button></div>

@@ -88,11 +88,24 @@ export interface BuildArtifactRecord {
 }
 
 export interface FirmwareConfiguration {
-  schemaVersion: 1;
+  schemaVersion: 2;
   foundationModules: string[];
   capabilityModules: string[];
   connectionModules: string[];
   flashMethods: Array<"swd" | "bluetooth">;
+  runtimeTransports: string[];
+  components: Array<{
+    id: string;
+    version: string;
+    kind: "foundation" | "capability" | "connection";
+    provides: Array<{ port: string; version: string }>;
+    requires: Array<{ port: string; version: string; count: number }>;
+    buildFeatures: string[];
+  }>;
+  portBindings: Array<{ consumerId: string; requiredPort: string; providerId: string; providedPort: string; version: string }>;
+  resourceBindings: Array<{ componentId: string; role: string; resourceId: string; kind: string }>;
+  buildFeatures: string[];
+  compositionSha256: string;
 }
 
 export interface FirmwareModuleRecord {
@@ -102,9 +115,15 @@ export interface FirmwareModuleRecord {
   description: { zh: string; en: string };
   requires: string[];
   conflicts: string[];
+  version: string;
+  provides: Array<{ port: string; version: string }>;
+  requiresPorts: Array<{ port: string; version: string; count: number }>;
+  resources: Array<{ kind: string; role: string; exclusive: boolean }>;
+  buildFeatures: string[];
   defaultEnabled?: boolean;
   required?: boolean;
   flashMethod?: "swd" | "bluetooth";
+  runtimeTransport?: string;
 }
 
 export interface BuildJobRecord {

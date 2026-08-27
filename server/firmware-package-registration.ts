@@ -62,7 +62,8 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   const byName = new Map(artifactResult.rows.map((artifact) => [artifact.name, artifact]));
   const manifestArtifact = byName.get("firmware-manifest.json");
   if (!manifestArtifact || manifestArtifact.kind !== "report") throw new Error("Runner 没有提交标准固件清单");
-  const manifest = generatedManifestSchema.parse(JSON.parse(manifestArtifact.content.toString("utf8")));
+  const rawManifest = JSON.parse(manifestArtifact.content.toString("utf8")) as { composition?: unknown };
+  const manifest = generatedManifestSchema.parse(rawManifest);
   const { adapter, target } = registered;
   const expectedComposition = resolveFirmwareConfiguration(adapter, target, [
     ...firmwareConfiguration.capabilityModules,
@@ -101,7 +102,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     if (Number(artifact.size) !== descriptor.size || artifact.sha256 !== descriptor.sha256 || actualSha256 !== descriptor.sha256) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
     }
-    const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(manifest.composition)}`);
+    const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(rawManifest.composition)}`);
     if (!firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload)) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含本次固件组合身份`);
     }

@@ -18,5 +18,5 @@
   "portBindings": [{ "consumerId": "capability.tuning", "requiredPort": "control.motor", "providerId": "capability.motor-control", "providedPort": "control.motor", "version": "1" }],
   "resourceBindings": [],
   "buildFeatures": [],
-  "compositionSha256": "c226e17705033288a9dff18bdd0f7cf123464db1ace2a18e504d59fd951a278d"
+  "compositionSha256": "537282fd17a4abd9dfe63a7868beb3e9957b6d143901e77c58fda4ddbab45be5"
 }

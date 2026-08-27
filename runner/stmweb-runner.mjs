@@ -21,6 +21,15 @@ function sha256(data) {
   return createHash("sha256").update(data).digest("hex");
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
@@ -175,7 +184,7 @@ function canonicalFirmwareConfiguration(value) {
     resourceBindings: structuredClone(value.resourceBindings),
     buildFeatures: [...value.buildFeatures],
   };
-  const digest = sha256(JSON.stringify(content));
+  const digest = sha256(canonicalJson(content));
   if (value.compositionSha256 !== digest) throw new Error("构建任务中的固件组合图摘要无效");
   return { ...content, compositionSha256: digest };
 }

@@ -22,5 +22,5 @@
   ],
   "resourceBindings": [{ "componentId": "connection.bluetooth", "role": "蓝牙连接", "resourceId": "board.usart3", "kind": "uart" }],
   "buildFeatures": ["dot.bluetooth-update"],
-  "compositionSha256": "83604a872ef0c98be24d1290270bb9ea311124ce534d8995d48831ee9e9e8a94"
+  "compositionSha256": "2d6a786536c3e08c77d0f85eb6ea28dadd90adf4659828886f52a4a8bad69319"
 }

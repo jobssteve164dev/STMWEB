@@ -38,6 +38,21 @@ test("resolves required modules, dependencies and selected flash methods on the 
   assert.throws(() => resolveFirmwareConfiguration(registered.adapter, registered.target, ["capability.unknown"]), /当前硬件不支持/);
 });
 
+test("accepts a composition after JSONB changes object key order", () => {
+  const registered = getFirmwareAdapterTarget("stmweb.dot-v1", "1", "stm32f103cb");
+  assert.ok(registered);
+  const composition = resolveFirmwareConfiguration(registered.adapter, registered.target, ["connection.swd"]);
+  const reorder = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(reorder);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).reverse().map(([key, item]) => [key, reorder(item)]));
+    }
+    return value;
+  };
+  const reordered = reorder(composition);
+  assert.deepEqual(verifyFirmwareComposition(reordered), reordered);
+});
+
 test("binds the bluetooth component to a board UART and emits its real build feature", () => {
   const registered = getFirmwareAdapterTarget("stmweb.dot-v1", "1", "stm32f103c8");
   assert.ok(registered);

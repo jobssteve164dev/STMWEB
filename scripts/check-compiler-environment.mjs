@@ -66,6 +66,7 @@ assert.match(runner, /path\.join\(stateDir, \"build-history\"\)/);
 assert.match(runner, /stmweb_firmware_manifest\.json/);
 assert.match(runner, /STMWEB_COMPOSITION_FILE/);
 assert.match(runner, /compositionSha256/);
+assert.match(runner, /canonicalJson\(content\)/);
 assert.match(runner, /firmware-manifest\.json/);
 assert.match(runner, /uploadArtifact\(state, job, logFile, "log"\)/);
 assert.match(runner, /logText\.slice\(-12_000\)/);

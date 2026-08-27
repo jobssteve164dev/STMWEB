@@ -128,7 +128,9 @@ router.post("/jobs/:jobId/events", asyncRoute(async (request, response) => {
       `SELECT id, status FROM build_jobs WHERE id=$1 AND runner_id=$2 AND lease_id=$3 FOR UPDATE`,
       [request.params.jobId, runner.id, body.leaseId],
     );
-    if (!jobResult.rows[0]) return false;
+    const job = jobResult.rows[0];
+    if (!job) return false;
+    if (["succeeded", "failed", "cancelled"].includes(job.status)) return true;
     for (const event of body.events) {
       await client.query(
         `INSERT INTO build_events (job_id,event_id,type,message,payload) VALUES ($1,$2,$3,$4,$5::jsonb)
@@ -142,6 +144,7 @@ router.post("/jobs/:jobId/events", asyncRoute(async (request, response) => {
         const status = event.type === "completed" ? "succeeded" : event.type;
         await client.query(`UPDATE build_jobs SET status=$2, progress=CASE WHEN $2='succeeded' THEN 100 ELSE progress END, finished_at=now(), error=$3, updated_at=now() WHERE id=$1`, [request.params.jobId, status, event.type === "failed" ? event.message ?? "构建失败" : null]);
         await client.query(`UPDATE build_runners SET current_job_id=NULL, status='online', last_seen_at=now() WHERE id=$1`, [runner.id]);
+        break;
       }
     }
     return true;

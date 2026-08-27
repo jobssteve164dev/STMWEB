@@ -112,7 +112,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     if (inspected.hardwareProfileId !== adapter.adapterId || inspected.artifactRole !== descriptor.role
       || inspected.flashSize !== target.flashSize || inspected.applicationBase !== target.applicationBase
       || inspected.applicationLimit !== target.applicationLimit || inspected.runtimeVersion !== adapter.runtimeVersion
-      || inspected.status !== "verified" || inspected.flashMethods.join(",") !== descriptor.flashMethods.join(",")) {
+      || inspected.status !== "verified" || descriptor.flashMethods.some((method) => !inspected.flashMethods.includes(method))) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 与硬件适配不兼容`);
     }
     return { descriptor, artifact, inspected };

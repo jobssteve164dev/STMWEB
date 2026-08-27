@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { getFirmwareAdapterTarget, listFirmwareAdapterTargets, resolveFirmwareConfiguration, verifyFirmwareComposition } from "../server/firmware-adapter-registry.js";
+import { getFirmwareAdapterTarget, listFirmwareAdapterTargets, resolveFirmwareConfiguration, sameFirmwareComposition, verifyFirmwareComposition } from "../server/firmware-adapter-registry.js";
 
 test("publishes the versioned firmware module catalog with each hardware target", () => {
   const compact = listFirmwareAdapterTargets().find((template) => template.target === "stm32f103c8");
@@ -51,6 +51,7 @@ test("accepts a composition after JSONB changes object key order", () => {
   };
   const reordered = reorder(composition);
   assert.deepEqual(verifyFirmwareComposition(reordered), reordered);
+  assert.equal(sameFirmwareComposition(composition, verifyFirmwareComposition(reordered)), true);
 });
 
 test("binds the bluetooth component to a board UART and emits its real build feature", () => {

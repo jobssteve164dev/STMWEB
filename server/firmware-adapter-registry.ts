@@ -157,6 +157,10 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+export function sameFirmwareComposition(left: FirmwareConfiguration, right: FirmwareConfiguration): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
 function compositionSha256(composition: Omit<FirmwareConfiguration, "compositionSha256">): string {
   return createHash("sha256").update(canonicalJson(composition)).digest("hex");
 }

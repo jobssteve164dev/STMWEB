@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { z } from "zod";
-import { firmwareCompositionSchema, getFirmwareAdapterTarget, resolveFirmwareConfiguration, verifyFirmwareComposition } from "./firmware-adapter-registry.js";
+import { firmwareCompositionSchema, getFirmwareAdapterTarget, resolveFirmwareConfiguration, sameFirmwareComposition, verifyFirmwareComposition } from "./firmware-adapter-registry.js";
 import { firmwareContainsPayload, inspectFirmwareArtifact } from "./firmware-artifact.js";
 
 const manifestArtifactSchema = z.object({
@@ -68,7 +68,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     ...firmwareConfiguration.capabilityModules,
     ...firmwareConfiguration.connectionModules,
   ]);
-  if (JSON.stringify(expectedComposition) !== JSON.stringify(firmwareConfiguration)) {
+  if (!sameFirmwareComposition(expectedComposition, firmwareConfiguration)) {
     throw new Error("构建任务中的解析后组合图与硬件适配不一致");
   }
   if (manifest.adapter.id !== adapter.adapterId || manifest.adapter.version !== adapter.adapterVersion
@@ -81,7 +81,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     || manifest.memory.applicationBase !== target.applicationBase || manifest.memory.applicationLimit !== target.applicationLimit
     || manifest.source.sha256 !== job.sourceSha256 || manifest.source.name !== job.sourceName
     || manifest.build.profile !== job.profile || manifest.build.target !== job.target
-    || JSON.stringify(manifest.composition) !== JSON.stringify(firmwareConfiguration)) {
+    || !sameFirmwareComposition(manifest.composition, firmwareConfiguration)) {
     throw new Error("标准固件清单与构建任务不一致");
   }
 

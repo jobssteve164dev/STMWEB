@@ -101,7 +101,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     if (Number(artifact.size) !== descriptor.size || artifact.sha256 !== descriptor.sha256 || actualSha256 !== descriptor.sha256) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
     }
-    const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(firmwareConfiguration)}`);
+    const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(manifest.composition)}`);
     if (!firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload)) {
       throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含本次固件组合身份`);
     }

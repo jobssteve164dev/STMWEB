@@ -117,7 +117,7 @@ docker run --rm --entrypoint node "$BUILD_IMAGE" -e 'process.exit(Number(process
   || fail "编译镜像缺少 Node.js 22" runtime_self_test_failed
 docker run --rm --entrypoint arm-none-eabi-gcc "$BUILD_IMAGE" --version >/dev/null \
   || fail "编译镜像缺少 ARM GCC" runtime_self_test_failed
-docker run --rm "$BUILD_IMAGE" sh -lc '. /opt/esp/idf/export.sh >/dev/null && test "$(idf.py --version)" = "ESP-IDF v5.4.2"' \
+docker run --rm "$BUILD_IMAGE" sh -lc 'export IDF_PATH=/opt/esp/idf && . "$IDF_PATH/export.sh" >/dev/null && test "$(idf.py --version)" = "ESP-IDF v5.4.2"' \
   || fail "编译镜像缺少 ESP-IDF 5.4.2" runtime_self_test_failed
 
 record_stage runner_install

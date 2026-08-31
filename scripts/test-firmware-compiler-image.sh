@@ -46,7 +46,8 @@ CONTAINER_ID=$(docker create --platform linux/amd64 --entrypoint sh "$IMAGE" -c 
       fi
     fi
   done
-  . /opt/esp/idf/export.sh >/dev/null
+  export IDF_PATH=/opt/esp/idf
+  . "$IDF_PATH/export.sh" >/dev/null
   idf.py -C /opt/stmweb/adapters/cardputer-adv \
     -B /tmp/stmweb-cardputer-adv \
     -DSDKCONFIG=/tmp/stmweb-cardputer-adv.sdkconfig \

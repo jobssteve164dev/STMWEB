@@ -233,7 +233,7 @@ async function execute(stateDir, state, job) {
     const hasCmake = await stat(cmake).then(() => true).catch(() => false);
     if (job.hardwareProfileId === "stmweb.cardputer-adv") {
       cmakeSource = `/opt/stmweb/adapters/${job.adapterBuildDirectory}`;
-      buildCommand = `. /opt/esp/idf/export.sh >/dev/null && idf.py -C ${cmakeSource} -B /output/build -DSDKCONFIG=/output/sdkconfig -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} build`;
+      buildCommand = `export IDF_PATH=/opt/esp/idf && . "$IDF_PATH/export.sh" >/dev/null && idf.py -C ${cmakeSource} -B /output/build -DSDKCONFIG=/output/sdkconfig -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} build`;
     } else if (!hasCmake) {
       const project = spawnSync("find", [source, "-type", "f", "-path", "*/USER/DOT.uvprojx", "-print", "-quit"], { encoding: "utf8", timeout: 10_000 }).stdout.trim();
       if (!project) throw new Error("无法识别源码工程；请上传 CMake 工程或受支持的 Keil 工程");

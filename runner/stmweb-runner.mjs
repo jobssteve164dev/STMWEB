@@ -5,9 +5,9 @@ import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:f
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 
-const VERSION = "0.3.10";
+const VERSION = "0.3.11";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
-const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.10";
+const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.11";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]);
 let supportedAdapterTargetCache;
@@ -158,12 +158,32 @@ function failureEvent(jobId, error) {
 async function uploadArtifact(state, job, file, kind) {
   const content = await readFile(file);
   const name = path.basename(file);
-  await request(state, `/api/runner/jobs/${job.id}/artifacts/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/octet-stream", "X-Lease-Id": job.leaseId, "X-Artifact-Kind": kind, "X-Content-SHA256": sha256(content) },
-    body: content,
-  });
-  return { name, kind, sha256: sha256(content), size: content.length };
+  const digest = sha256(content);
+  const chunkSize = 256 * 1024;
+  for (let offset = 0; offset < content.length; offset += chunkSize) {
+    const chunk = content.subarray(offset, Math.min(offset + chunkSize, content.length));
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await request(state, `/api/runner/jobs/${job.id}/artifacts/${encodeURIComponent(name)}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/octet-stream", "X-Lease-Id": job.leaseId,
+            "X-Artifact-Kind": kind, "X-Content-SHA256": digest,
+            "X-Artifact-Offset": String(offset), "X-Artifact-Total-Size": String(content.length),
+          },
+          body: chunk,
+        });
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    }
+    if (lastError) throw lastError;
+  }
+  return { name, kind, sha256: digest, size: content.length };
 }
 
 function canonicalFirmwareConfiguration(value) {

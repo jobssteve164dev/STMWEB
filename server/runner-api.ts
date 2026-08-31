@@ -172,20 +172,58 @@ router.put("/jobs/:jobId/artifacts/:name", express.raw({ type: "application/octe
   const kind = z.enum(["elf", "hex", "bin", "map", "log", "report"]).parse(request.get("x-artifact-kind"));
   const expectedHash = z.string().regex(/^[a-f0-9]{64}$/).parse(request.get("x-content-sha256"));
   const content = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  const offset = z.coerce.number().int().min(0).parse(request.get("x-artifact-offset") ?? 0);
+  const totalSize = z.coerce.number().int().positive().max(32 * 1024 * 1024).parse(request.get("x-artifact-total-size") ?? content.length);
+  if (!content.length || offset + content.length > totalSize) { response.status(400).json({ error: "制品分块范围无效" }); return; }
   const { createHash } = await import("node:crypto");
-  if (createHash("sha256").update(content).digest("hex") !== expectedHash) { response.status(400).json({ error: "制品摘要不匹配" }); return; }
-  const access = await pool.query(`SELECT id FROM build_jobs WHERE id=$1 AND runner_id=$2 AND lease_id=$3`, [request.params.jobId, runner.id, leaseId]);
-  if (!access.rowCount) { response.status(409).json({ error: "任务租约已失效" }); return; }
-  await pool.query(
-    `INSERT INTO build_artifacts (job_id,name,kind,sha256,size,content) VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (job_id,name) DO UPDATE SET kind=EXCLUDED.kind,sha256=EXCLUDED.sha256,size=EXCLUDED.size,content=EXCLUDED.content`,
-    [request.params.jobId, request.params.name, kind, expectedHash, content.length, content],
-  );
-  response.status(201).json({ success: true });
+  const assembled = await withTransaction(async (client) => {
+    const access = await client.query(
+      `SELECT id FROM build_jobs WHERE id=$1 AND runner_id=$2 AND lease_id=$3 AND status IN ('leased','running') FOR UPDATE`,
+      [request.params.jobId, runner.id, leaseId],
+    );
+    if (!access.rowCount) throw Object.assign(new Error("任务租约已失效"), { status: 409 });
+    const existing = await client.query<{ size: number; sha256: string }>(
+      `SELECT octet_length(content)::int AS size,sha256 FROM build_artifacts WHERE job_id=$1 AND name=$2 FOR UPDATE`,
+      [request.params.jobId, request.params.name],
+    );
+    const current = existing.rows[0];
+    if (offset === 0) {
+      await client.query(
+        `INSERT INTO build_artifacts (job_id,name,kind,sha256,size,content) VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (job_id,name) DO UPDATE SET kind=EXCLUDED.kind,sha256=EXCLUDED.sha256,size=EXCLUDED.size,content=EXCLUDED.content`,
+        [request.params.jobId, request.params.name, kind, expectedHash, content.length, content],
+      );
+      if (content.length === totalSize && createHash("sha256").update(content).digest("hex") !== expectedHash) {
+        throw Object.assign(new Error("制品摘要不匹配"), { status: 400 });
+      }
+      return content.length;
+    }
+    if (!current || current.sha256 !== expectedHash) throw Object.assign(new Error("制品分块起点无效"), { status: 409 });
+    if (current.size === offset) {
+      const updated = await client.query<{ content: Buffer }>(`UPDATE build_artifacts SET content=content||$3::bytea,size=$4,kind=$5 WHERE job_id=$1 AND name=$2 RETURNING content`,
+        [request.params.jobId, request.params.name, content, offset + content.length, kind]);
+      if (offset + content.length === totalSize && createHash("sha256").update(updated.rows[0].content).digest("hex") !== expectedHash) {
+        throw Object.assign(new Error("制品摘要不匹配"), { status: 400 });
+      }
+      return offset + content.length;
+    }
+    if (current.size === offset + content.length) {
+      if (current.size === totalSize) {
+        const complete = await client.query<{ content: Buffer }>(`SELECT content FROM build_artifacts WHERE job_id=$1 AND name=$2`, [request.params.jobId, request.params.name]);
+        if (createHash("sha256").update(complete.rows[0].content).digest("hex") !== expectedHash) throw Object.assign(new Error("制品摘要不匹配"), { status: 400 });
+      }
+      return current.size;
+    }
+    throw Object.assign(new Error("制品分块偏移冲突"), { status: 409 });
+  });
+  response.status(assembled === totalSize ? 201 : 202).json({ success: true, received: assembled });
 }));
 
 router.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof z.ZodError) { response.status(400).json({ error: "Runner 提交的数据格式不正确" }); return; }
+  if (typeof error === "object" && error && "status" in error) {
+    response.status(Number(error.status)).json({ error: "message" in error ? String(error.message) : "制品分块提交失败" }); return;
+  }
   console.error("Runner API request failed", error);
   response.status(500).json({ error: "编译算力服务暂时不可用" });
 });

@@ -12,6 +12,15 @@ const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]);
 let supportedAdapterTargetCache;
 
+function targetResourceLimits() {
+  const cpuCores = Number(process.env.RUNNER_TARGET_CPU_CORES);
+  const memoryMb = Number(process.env.RUNNER_TARGET_MEMORY_MB);
+  if (!Number.isFinite(cpuCores) || cpuCores <= 0 || !Number.isSafeInteger(memoryMb) || memoryMb < 256) {
+    throw new Error("Runner Target 资源预算缺失或无效");
+  }
+  return { cpuCores: String(cpuCores), memoryMb };
+}
+
 function value(args, flag, fallback) {
   const index = args.indexOf(flag);
   return index >= 0 ? args[index + 1] : fallback;
@@ -61,6 +70,7 @@ async function request(state, route, init = {}) {
 }
 
 function capabilities() {
+  const limits = targetResourceLimits();
   const docker = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8", timeout: 10_000 });
   const disk = spawnSync("df", ["-Pm", process.cwd()], { encoding: "utf8", timeout: 5_000 });
   const diskFreeMb = Number(disk.stdout.trim().split(/\s+/).at(-3)) || 0;
@@ -71,6 +81,7 @@ function capabilities() {
     environmentVersion: BUILD_IMAGE,
     firmwareCompositionVersion: 2,
     maxConcurrentBuilds: 1,
+    resourceLimits: { cpuCores: Number(limits.cpuCores), memoryMb: limits.memoryMb },
     diskFreeMb,
     supportedAdapterTargets: supportedAdapterTargets().map(({ hardwareProfileId, adapterVersion, target }) => ({ hardwareProfileId, adapterVersion, target })),
     toolchains: [
@@ -220,6 +231,7 @@ function firmwareConfigurationSource(configuration) {
 }
 
 async function execute(stateDir, state, job) {
+  const limits = targetResourceLimits();
   if (!allowedProfiles.has(job.profile) || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(job.target)
     || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(job.adapterBuildDirectory)) throw new Error("Runner 不支持该构建配置");
   const supported = supportedAdapterTargets().some((item) => item.hardwareProfileId === job.hardwareProfileId
@@ -273,7 +285,7 @@ async function execute(stateDir, state, job) {
     if (!imageReady()) throw new Error("编译环境尚未由 GitOps Agent 正确安装或内容校验失败");
     await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "accepted", "Runner 已接收并校验源码"), event(job.id, "started", "开始编译")]);
     const args = [
-      "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "1g", "--pids-limit", "256",
+      "run", "--rm", "--network", "none", "--cpus", limits.cpuCores, "--memory", `${limits.memoryMb}m`, "--memory-swap", `${limits.memoryMb}m`, "--pids-limit", "256",
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-e", "CCACHE_DISABLE=1",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,

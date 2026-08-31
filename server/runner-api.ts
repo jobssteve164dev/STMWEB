@@ -13,6 +13,7 @@ const capabilitiesSchema = z.object({
   backend: z.string().max(64),
   environmentVersion: z.string().max(120),
   maxConcurrentBuilds: z.number().int().min(1).max(4).default(1),
+  resourceLimits: z.object({ cpuCores: z.number().positive(), memoryMb: z.number().int().min(256) }).optional(),
   firmwareCompositionVersion: z.literal(2).optional(),
   supportedAdapterTargets: z.array(z.object({
     hardwareProfileId: z.string().max(120),

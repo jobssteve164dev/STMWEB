@@ -7,6 +7,7 @@ test("runner doctor reports its immutable build capability contract", () => {
   const result = spawnSync(process.execPath, ["runner/stmweb-runner.mjs", "doctor"], {
     cwd: process.cwd(),
     encoding: "utf8",
+    env: { ...process.env, RUNNER_TARGET_CPU_CORES: "2", RUNNER_TARGET_MEMORY_MB: "2048" },
   });
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout) as {
@@ -24,9 +25,21 @@ test("runner doctor reports its immutable build capability contract", () => {
 
 test("runner uploads firmware artifacts in resumable chunks", () => {
   const runner = readFileSync("runner/stmweb-runner.mjs", "utf8");
+  const installer = readFileSync("runner/install-runner-package.sh", "utf8");
+  const directInstaller = readFileSync("runner/install-runner.sh", "utf8");
   const api = readFileSync("server/runner-api.ts", "utf8");
   assert.match(runner, /X-Artifact-Offset/);
   assert.match(runner, /X-Artifact-Total-Size/);
+  assert.match(runner, /RUNNER_TARGET_CPU_CORES/);
+  assert.match(runner, /RUNNER_TARGET_MEMORY_MB/);
+  assert.match(runner, /"--cpus", limits\.cpuCores/);
+  assert.match(runner, /"--memory", `\$\{limits\.memoryMb\}m`/);
+  assert.match(runner, /"--memory-swap", `\$\{limits\.memoryMb\}m`/);
+  assert.match(installer, /RUNNER_TARGET_CPU_CORES/);
+  assert.match(installer, /RUNNER_TARGET_MEMORY_MB/);
+  assert.match(installer, /Environment="RUNNER_TARGET_CPU_CORES=/);
+  assert.match(directInstaller, /--cpu-cores/);
+  assert.match(directInstaller, /Environment="RUNNER_TARGET_CPU_CORES=/);
   assert.match(api, /x-artifact-offset/);
   assert.match(api, /octet_length\(content\)/);
   assert.match(api, /status IN \('leased','running'\) FOR UPDATE/);

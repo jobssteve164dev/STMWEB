@@ -91,8 +91,16 @@ PY
 mapfile -t VALUES <<< "$PACKAGE_VALUES"
 [[ "${#VALUES[@]}" -eq 4 ]] || fail "固件编译包内容清单不完整" package_manifest_invalid
 BUILD_IMAGE="${VALUES[0]}"
-(( $(getconf _NPROCESSORS_ONLN) >= VALUES[1] )) || fail "节点 CPU 不足" insufficient_cpu
-(( $(awk '/MemTotal:/ { print int($2 / 1024) }' /proc/meminfo) >= VALUES[2] )) || fail "节点内存不足" insufficient_memory
+TARGET_CPU_CORES="${RUNNER_TARGET_CPU_CORES:-}"
+TARGET_MEMORY_MB="${RUNNER_TARGET_MEMORY_MB:-}"
+[[ "$TARGET_CPU_CORES" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "Runner Target CPU 预算无效" invalid_request
+[[ "$TARGET_MEMORY_MB" =~ ^[0-9]+$ ]] || fail "Runner Target 内存预算无效" invalid_request
+awk -v actual="$TARGET_CPU_CORES" -v minimum="${VALUES[1]}" 'BEGIN { exit !(actual >= minimum) }' \
+  || fail "Runner Target CPU 预算低于编译环境要求" insufficient_cpu
+(( TARGET_MEMORY_MB >= VALUES[2] )) || fail "Runner Target 内存预算低于编译环境要求" insufficient_memory
+awk -v available="$(getconf _NPROCESSORS_ONLN)" -v required="$TARGET_CPU_CORES" 'BEGIN { exit !(available >= required) }' \
+  || fail "节点 CPU 不足" insufficient_cpu
+(( $(awk '/MemTotal:/ { print int($2 / 1024) }' /proc/meminfo) >= TARGET_MEMORY_MB )) || fail "节点内存不足" insufficient_memory
 (( $(df -Pm / | awk 'NR == 2 { print $4 }') >= VALUES[3] )) || fail "节点可用磁盘不足" insufficient_storage
 
 EXISTING_REGISTRATION=0
@@ -129,6 +137,7 @@ unset PAIRING_CODE
 if [[ "$EXISTING_REGISTRATION" -eq 0 ]]; then
   docker run --rm --entrypoint node \
     -e STMWEB_BUILD_IMAGE="$BUILD_IMAGE" -e STMWEB_BUILD_IMAGE_ID="$BUILD_IMAGE_ID" \
+    -e RUNNER_TARGET_CPU_CORES="$TARGET_CPU_CORES" -e RUNNER_TARGET_MEMORY_MB="$TARGET_MEMORY_MB" \
     -v "$INSTALL_ROOT:$INSTALL_ROOT:ro" -v "$STATE_ROOT:$STATE_ROOT" \
     -v "$PAIRING_CODE_FILE:/run/stmweb-pairing-code:ro" \
     "$BUILD_IMAGE" "$INSTALL_ROOT/stmweb-runner.mjs" register \
@@ -147,7 +156,9 @@ Requires=docker.service
 Type=simple
 Environment="STMWEB_BUILD_IMAGE=$BUILD_IMAGE"
 Environment="STMWEB_BUILD_IMAGE_ID=$BUILD_IMAGE_ID"
-ExecStart=/usr/bin/docker run --rm --name stmweb-runner-runtime --entrypoint node -e STMWEB_BUILD_IMAGE=$BUILD_IMAGE -e STMWEB_BUILD_IMAGE_ID=$BUILD_IMAGE_ID -v /var/run/docker.sock:/var/run/docker.sock -v $INSTALL_ROOT:$INSTALL_ROOT:ro -v $STATE_ROOT:$STATE_ROOT $BUILD_IMAGE $INSTALL_ROOT/stmweb-runner.mjs connect --state-dir $STATE_ROOT
+Environment="RUNNER_TARGET_CPU_CORES=$TARGET_CPU_CORES"
+Environment="RUNNER_TARGET_MEMORY_MB=$TARGET_MEMORY_MB"
+ExecStart=/usr/bin/docker run --rm --name stmweb-runner-runtime --entrypoint node -e STMWEB_BUILD_IMAGE=$BUILD_IMAGE -e STMWEB_BUILD_IMAGE_ID=$BUILD_IMAGE_ID -e RUNNER_TARGET_CPU_CORES=$TARGET_CPU_CORES -e RUNNER_TARGET_MEMORY_MB=$TARGET_MEMORY_MB -v /var/run/docker.sock:/var/run/docker.sock -v $INSTALL_ROOT:$INSTALL_ROOT:ro -v $STATE_ROOT:$STATE_ROOT $BUILD_IMAGE $INSTALL_ROOT/stmweb-runner.mjs connect --state-dir $STATE_ROOT
 ExecStop=-/usr/bin/docker stop stmweb-runner-runtime
 Restart=always
 RestartSec=5

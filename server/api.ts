@@ -202,10 +202,14 @@ router.get("/workspaces/:workspaceId/hardware-projects", asyncRoute(async (reque
     const selected = saved && Array.isArray(saved.capabilityModules) && Array.isArray(saved.connectionModules)
       ? [...saved.capabilityModules, ...saved.connectionModules].filter((item): item is string => typeof item === "string")
       : undefined;
-    return { ...project, firmwareConfiguration: registered ? resolveFirmwareConfiguration(registered.adapter, registered.target, selected) : {
-      schemaVersion: 2, foundationModules: [], capabilityModules: [], connectionModules: [], flashMethods: [], runtimeTransports: [], components: [],
-      portBindings: [], resourceBindings: [], buildFeatures: [], compositionSha256: "",
-    } };
+    return {
+      ...project,
+      requiresExternalSource: !standardFirmwareSource(project.hardwareProfileId, project.adapterVersion, project.target),
+      firmwareConfiguration: registered ? resolveFirmwareConfiguration(registered.adapter, registered.target, selected) : {
+        schemaVersion: 2, foundationModules: [], capabilityModules: [], connectionModules: [], flashMethods: [], runtimeTransports: [], components: [],
+        portBindings: [], resourceBindings: [], buildFeatures: [], compositionSha256: "",
+      },
+    };
   }) });
 }));
 

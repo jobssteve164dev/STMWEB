@@ -112,6 +112,13 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     });
     assert.equal(cardputerProjectResponse.status, 201);
     const cardputerProjectBody = await cardputerProjectResponse.json() as { hardwareProject: { id: string } };
+    const hardwareProjectsResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, { headers });
+    assert.equal(hardwareProjectsResponse.status, 200);
+    const hardwareProjectsBody = await hardwareProjectsResponse.json() as { hardwareProjects: Array<{ name: string; requiresExternalSource: boolean }> };
+    assert.deepEqual(hardwareProjectsBody.hardwareProjects.map((project) => ({ name: project.name, requiresExternalSource: project.requiresExternalSource })).sort((left, right) => left.name.localeCompare(right.name)), [
+      { name: "Cardputer 集成测试", requiresExternalSource: false },
+      { name: "DOT 64K 集成测试", requiresExternalSource: true },
+    ]);
 
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, { headers })).status, 200);
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, {

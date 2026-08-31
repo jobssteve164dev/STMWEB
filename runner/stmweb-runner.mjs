@@ -254,6 +254,7 @@ async function execute(stateDir, state, job) {
     const args = [
       "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "1g", "--pids-limit", "256",
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
+      "-e", "CCACHE_DISABLE=1",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
       BUILD_IMAGE, "bash", "-lc",
       buildCommand,

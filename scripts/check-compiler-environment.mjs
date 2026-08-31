@@ -81,6 +81,7 @@ assert.match(runner, /idf\.py/);
 assert.match(runner, /export IDF_PATH=\/opt\/esp\/idf/);
 assert.match(runner, /BUILD_IMAGE, "bash", "-lc"/);
 assert.doesNotMatch(runner, /BUILD_IMAGE, "sh", "-lc"/);
+assert.match(runner, /"--read-only"[\s\S]*?"-e", "CCACHE_DISABLE=1"[\s\S]*?"-v"[\s\S]*?BUILD_IMAGE, "bash", "-lc"/);
 assert.match(runner, /stmweb\/compiler:v0\.3\.0/);
 assert.match(serverEnv, /stmweb\/compiler:v0\.3\.0/);
 assert.match(compose, /stmweb\/compiler:v0\.3\.0/);

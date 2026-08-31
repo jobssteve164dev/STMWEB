@@ -27,6 +27,10 @@ python3 - "$PACKAGE_PATH" "$VERSION" "$SOURCE_REVISION" "$IMAGE" <<'PY'
 import hashlib, json, sys, tarfile
 package_path, version, revision, image = sys.argv[1:]
 required = {"install-runner-package.sh", "package-manifest.json", "bin/stmweb-runner.mjs", "runtime/image.tar.gz"}
+def sha256_stream(stream):
+    digest = hashlib.sha256()
+    while chunk := stream.read(1024 * 1024): digest.update(chunk)
+    return digest.hexdigest()
 with tarfile.open(package_path, "r:gz") as package:
     members = package.getmembers(); names = {m.name.lstrip("./") for m in members if m.isfile()}
     if names != required or any(m.issym() or m.islnk() for m in members): raise SystemExit("package member set is invalid")
@@ -36,7 +40,7 @@ with tarfile.open(package_path, "r:gz") as package:
     if manifest.get("platform") != "linux/amd64" or manifest.get("image") != image: raise SystemExit("runtime identity mismatch")
     if set(manifest.get("files") or {}) != required - {"package-manifest.json"}: raise SystemExit("package content map is invalid")
     for name, digest in manifest["files"].items():
-        if hashlib.sha256(package.extractfile(by_name[name]).read()).hexdigest() != digest: raise SystemExit(f"digest mismatch: {name}")
+        if sha256_stream(package.extractfile(by_name[name])) != digest: raise SystemExit(f"digest mismatch: {name}")
 PY
 
 RUNTIME_ARCHIVE="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/stmweb-runtime.XXXXXX.tar.gz")"

@@ -5,9 +5,9 @@ import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:f
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.10";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
-const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.0";
+const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.10";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]);
 let supportedAdapterTargetCache;
@@ -72,6 +72,7 @@ function capabilities() {
     firmwareCompositionVersion: 2,
     maxConcurrentBuilds: 1,
     diskFreeMb,
+    supportedAdapterTargets: supportedAdapterTargets().map(({ hardwareProfileId, adapterVersion, target }) => ({ hardwareProfileId, adapterVersion, target })),
     toolchains: [
       { id: "arm-none-eabi-gcc", version: "container-pinned", targets: supportedAdapterTargets().filter((item) => item.hardwareProfileId === "stmweb.dot-v1").map((item) => item.target) },
       { id: "esp-idf", version: "5.4.2", targets: supportedAdapterTargets().filter((item) => item.hardwareProfileId === "stmweb.cardputer-adv").map((item) => item.target) },

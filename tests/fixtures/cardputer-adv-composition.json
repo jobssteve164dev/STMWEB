@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "foundationModules": ["platform.boot-recovery", "platform.device-identity", "platform.debug-safety"],
+  "capabilityModules": ["capability.display-twin", "capability.keyboard-map", "capability.battery"],
+  "connectionModules": ["connection.usb", "connection.bluetooth"],
+  "flashMethods": ["usb", "bluetooth"],
+  "runtimeTransports": ["usb-serial", "bluetooth-gatt"],
+  "components": [],
+  "portBindings": [],
+  "resourceBindings": [],
+  "buildFeatures": ["cardputer.display-twin", "cardputer.keyboard-map", "cardputer.bluetooth-ota"],
+  "compositionSha256": "smoke"
+}

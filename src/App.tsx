@@ -70,14 +70,15 @@ import {
 import { DeviceWorkbench, type TelemetrySnapshot } from "./DeviceWorkbench.js";
 import {
   demoCapabilityManifest,
-  parseCapabilityManifest,
   recommendedComponents,
   type DeviceCapabilityManifest,
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
+import { applyCardputerAdvEvent, cardputerAdvInitialTwin, parseCardputerAdvStream, type CardputerAdvTwinState } from "./cardputer-adv.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
 import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
+import { CardputerAdvFirmwareFlashPanel } from "./CardputerAdvFirmwareFlashPanel.js";
 import { SwdFlashPanel } from "./InitialSwdFlashPanel.js";
 import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
 import { useLocale } from "./i18n.js";
@@ -246,6 +247,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
   const [telemetry, setTelemetry] = useState<number[]>([]);
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<TelemetrySnapshot>(emptyTelemetrySnapshot);
   const [deviceManifest, setDeviceManifest] = useState<DeviceCapabilityManifest | null>(null);
+  const [cardputerTwin, setCardputerTwin] = useState<CardputerAdvTwinState>(cardputerAdvInitialTwin);
   const [selectedComponents, setSelectedComponents] = useState<DeviceCapabilityType[]>([]);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [storageHealthy, setStorageHealthy] = useState(true);
@@ -258,6 +260,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
   const dotTelemetryCarryRef = useRef("");
+  const cardputerStreamCarryRef = useRef("");
 
   const selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? {
     ...emptyDevice,
@@ -268,6 +271,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     version: c("未关联", "Not linked"),
   };
   const activeCapability = capabilities.find((item) => item.id === selectedCapability);
+  const hasCardputerWorkbench = deviceManifest?.device.id === "cardputer-adv";
 
   const combinedFirmware = useMemo(
     () => [
@@ -540,14 +544,20 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
           flowControl: serialFlowControl,
         },
         onSerialText: (text) => {
-          const manifest = parseCapabilityManifest(text);
-          if (manifest) {
-            setDeviceManifest(manifest);
-            appendEvent("success", c(`已识别 ${manifest.capabilities.length} 项设备能力`, `${manifest.capabilities.length} device capabilities detected`), {
-              model: manifest.device.model,
-              firmwareVersion: manifest.device.firmwareVersion,
-            });
-            return;
+          const cardputer = parseCardputerAdvStream(cardputerStreamCarryRef.current, text);
+          cardputerStreamCarryRef.current = cardputer.carry;
+          for (const event of cardputer.events) {
+            if (event.type === "manifest") {
+              setDeviceManifest(event.manifest);
+              appendEvent("success", c(`已识别 ${event.manifest.capabilities.length} 项设备能力`, `${event.manifest.capabilities.length} device capabilities detected`), {
+                model: event.manifest.device.model,
+                firmwareVersion: event.manifest.device.firmwareVersion,
+              });
+            } else if (event.type === "battery") {
+              setTelemetrySnapshot((current) => ({ ...current, voltage: event.voltage }));
+            } else {
+              setCardputerTwin((current) => applyCardputerAdvEvent(current, event));
+            }
           }
           const dotTelemetry = parseDotTelemetryChunk(dotTelemetryCarryRef.current, text);
           dotTelemetryCarryRef.current = dotTelemetry.carry;
@@ -559,7 +569,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               return next;
             });
           }
-          appendEvent("data", text.trim() || c("收到串口数据", "Serial data received"));
+          if (!cardputer.events.length) appendEvent("data", text.trim() || c("收到串口数据", "Serial data received"));
         },
         onDisconnect: () => {
           void handleUnexpectedHardwareDisconnect();
@@ -592,6 +602,8 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     setSelectedComponents([]);
     setTelemetry([]);
     dotTelemetryCarryRef.current = "";
+    cardputerStreamCarryRef.current = "";
+    setCardputerTwin(cardputerAdvInitialTwin);
     setLogs([]);
   }
 
@@ -788,6 +800,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   manifest={deviceManifest}
                   selected={selectedComponents}
                   telemetry={telemetrySnapshot}
+                  twin={cardputerTwin}
                   isDemo={Boolean(connectionInfo?.isDemo)}
                   proAccess={planAccess.pro}
                   onOpenFirmware={() => setActiveView("firmware")}
@@ -868,11 +881,10 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               <section className="firmware-actions" aria-labelledby="firmware-actions-heading">
                 <div className="firmware-actions-heading">
                   <div><span className="panel-kicker">{c("常用工具", "Common tools")}</span><h2 id="firmware-actions-heading">{c("固件安装与升级", "Firmware installation & updates")}</h2></div>
-                  <p>{c("SWD 可长期用于安装、更新和恢复；硬件支持无线时，也可以直接升级应用。", "Use SWD for installation, updates and recovery at any time. Compatible hardware can also update applications wirelessly.")}</p>
+                  <p>{hasCardputerWorkbench ? c("首次通过 USB 安装，之后可直接用蓝牙升级应用。", "Install once over USB, then update applications directly over Bluetooth.") : c("SWD 可长期用于安装、更新和恢复；硬件支持无线时，也可以直接升级应用。", "Use SWD for installation, updates and recovery at any time. Compatible hardware can also update applications wirelessly.")}</p>
                 </div>
                 <div className="firmware-actions-grid">
-                  <SwdFlashPanel firmwareVersions={firmwareVersions} />
-                  <DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} />
+                  {hasCardputerWorkbench ? <CardputerAdvFirmwareFlashPanel connection={connectionRef.current} firmwareVersions={firmwareVersions} onEvent={appendEvent} /> : <><SwdFlashPanel firmwareVersions={firmwareVersions} /><DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} /></>}
                 </div>
               </section>
               <BuildRunnerPanel proAccess={planAccess.pro} />
@@ -886,7 +898,7 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   {combinedFirmware.map((version) => (
                     <article className="artifact-card" key={version.id}>
                       <span className="artifact-icon"><FileCode2 size={21} /></span>
-                      <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                      <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : version.hardwareProfileId === "stmweb.cardputer-adv" ? ` · Cardputer ADV · ${version.artifactRole === "complete-image" ? c("USB 首次安装", "Initial USB install") : c("蓝牙应用升级", "Bluetooth application update")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
                       <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
                     </article>
                   ))}

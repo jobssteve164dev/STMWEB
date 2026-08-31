@@ -2792,6 +2792,8 @@ td small {
 }
 
 .camera-widget { grid-column: span 7; }
+.cardputer-display-widget { grid-column: span 5; }
+.cardputer-keyboard-widget { grid-column: span 7; }
 .orientation-widget { grid-column: span 5; }
 .motor-widget { grid-column: span 7; }
 .battery-widget { grid-column: span 5; }
@@ -2829,6 +2831,61 @@ td small {
   border-radius: 50%;
   height: 7px;
   width: 7px;
+}
+
+.cardputer-screen {
+  aspect-ratio: 240 / 135;
+  border: 8px solid #1f2937;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #e6fffa;
+  display: flex;
+  flex-direction: column;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: clamp(12px, 1.35vw, 17px);
+  gap: 5px;
+  justify-content: center;
+  line-height: 1.2;
+  overflow: hidden;
+  padding: 14px 18px;
+}
+
+.cardputer-keyboard {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+}
+
+.cardputer-keyboard-scroll {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.cardputer-keyboard-hint { color: var(--text-muted); display: none; font-size: 12px; margin-top: 8px; }
+
+.cardputer-key {
+  align-items: center;
+  background: #f2f5f7;
+  border: 1px solid #cdd5dc;
+  border-radius: 5px;
+  color: #344054;
+  display: flex;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  justify-content: center;
+  min-height: 31px;
+  overflow: hidden;
+  padding: 3px 1px;
+  text-align: center;
+}
+
+.cardputer-key.pressed {
+  background: #1f8f70;
+  border-color: #16775d;
+  box-shadow: 0 0 0 2px rgba(31, 143, 112, 0.2);
+  color: #fff;
+  transform: translateY(1px);
 }
 
 .camera-stage {
@@ -3250,6 +3307,12 @@ td small {
 .build-result-actions button:hover { background: var(--surface-raised); border-color: var(--border-strong); }
 .build-result-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
 .build-artifact-details { grid-column: 2 / -1; }
+.cardputer-install-guide { border-top: 1px solid var(--border); grid-column: 2 / -1; padding-top: 4px; }
+.cardputer-install-guide summary { color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; min-height: 44px; padding: 14px 0; width: fit-content; }
+.cardputer-install-guide ol { color: var(--text-muted); display: grid; font-size: 12px; gap: 7px; margin: 0 0 12px; padding-left: 22px; }
+.install-command { align-items: center; display: flex; gap: 8px; margin-bottom: 12px; }
+.install-command code { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; color: var(--text); flex: 1; overflow-x: auto; padding: 10px; white-space: nowrap; }
+.install-command button { align-items: center; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text); cursor: pointer; display: flex; gap: 6px; min-height: 44px; padding: 0 11px; white-space: nowrap; }
 .build-artifact-details summary { align-items: center; color: var(--text-muted); cursor: pointer; display: flex; font-size: 12px; gap: 8px; min-height: 44px; width: fit-content; }
 .build-artifact-details summary span { color: var(--text-muted); font-size: 11px; }
 .build-artifact-details > div { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 2px 0 8px; }
@@ -3306,6 +3369,8 @@ td small {
   .firmware-actions-grid { grid-template-columns: 1fr; }
   .component-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .camera-widget,
+  .cardputer-display-widget,
+  .cardputer-keyboard-widget,
   .orientation-widget,
   .motor-widget,
   .battery-widget,
@@ -3329,6 +3394,9 @@ td small {
   .motor-pair { grid-template-columns: 1fr; }
   .orientation-body { grid-template-columns: 1fr; }
   .camera-stage { aspect-ratio: 4 / 3; }
+  .cardputer-keyboard { gap: 4px; min-width: 600px; }
+  .cardputer-key { font-size: 9px; min-height: 31px; }
+  .cardputer-keyboard-hint { display: block; }
   .runner-summary { align-items: stretch; flex-direction: column; }
   .runner-summary .secondary-button { width: 100%; }
   .pairing-command { grid-template-columns: 1fr; }
@@ -3346,6 +3414,8 @@ td small {
   .build-result-actions a,
   .build-result-actions button { justify-content: center; width: 100%; }
   .build-artifact-details > div { grid-template-columns: 1fr; }
+  .install-command { align-items: stretch; flex-direction: column; }
+  .install-command button { justify-content: center; }
   .initial-flash-card { align-items: stretch; grid-template-columns: 1fr; }
   .initial-flash-card > .primary-button { width: 100%; }
   .firmware-flash-source { align-items: stretch; grid-template-columns: 1fr; }

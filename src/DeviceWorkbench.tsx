@@ -8,6 +8,8 @@ import {
   FileCode2,
   Gauge,
   ListChecks,
+  Monitor,
+  Keyboard as KeyboardIcon,
   SlidersHorizontal,
   SquareTerminal,
   VideoOff,
@@ -19,6 +21,7 @@ import {
   type DeviceCapabilityManifest,
   type DeviceCapabilityType,
 } from "./device-capabilities.js";
+import { cardputerAdvInitialTwin, cardputerAdvKeyRows, type CardputerAdvTwinState } from "./cardputer-adv.js";
 import { useLocale } from "./i18n.js";
 
 interface TelemetrySnapshot {
@@ -45,6 +48,7 @@ interface DeviceWorkbenchProps {
   manifest: DeviceCapabilityManifest;
   selected: DeviceCapabilityType[];
   telemetry: TelemetrySnapshot;
+  twin?: CardputerAdvTwinState;
   isDemo: boolean;
   proAccess: boolean;
   onOpenFirmware: () => void;
@@ -52,6 +56,8 @@ interface DeviceWorkbenchProps {
 }
 
 const componentIcons: Record<DeviceCapabilityType, LucideIcon> = {
+  display: Monitor,
+  keyboard: KeyboardIcon,
   orientation: Activity,
   camera: Camera,
   motor: Gauge,
@@ -64,6 +70,7 @@ const componentIcons: Record<DeviceCapabilityType, LucideIcon> = {
 };
 
 const englishComponentLabels: Record<DeviceCapabilityType, string> = {
+  display: "Digital Twin Display", keyboard: "56-key Map",
   orientation: "Orientation", camera: "Camera", motor: "Motor", battery: "Battery", chart: "Charts",
   terminal: "Terminal", controls: "Controls", events: "Events", firmware: "Firmware Build",
 };
@@ -76,7 +83,7 @@ function availableTypes(manifest: DeviceCapabilityManifest): DeviceCapabilityTyp
   return [...values];
 }
 
-export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAccess, onOpenFirmware, onChange }: DeviceWorkbenchProps) {
+export function DeviceWorkbench({ manifest, selected, telemetry, twin = cardputerAdvInitialTwin, isDemo, proAccess, onOpenFirmware, onChange }: DeviceWorkbenchProps) {
   const { isEnglish } = useLocale();
   const c = (zh: string, en: string) => isEnglish ? en : zh;
   const statusLabel = (status: string) => status === "online" ? c("在线", "Online") : status === "degraded" ? c("受限", "Degraded") : status === "offline" ? c("离线", "Offline") : c("待确认", "Unknown");
@@ -125,6 +132,31 @@ export function DeviceWorkbench({ manifest, selected, telemetry, isDemo, proAcce
         <div className="workbench-empty"><Cpu size={24} /><strong>{c("还没有选择调试组件", "No debugging components selected")}</strong><span>{c("从上方选择本次需要查看或操作的内容。", "Choose what you want to monitor or control above.")}</span></div>
       ) : (
         <div className="workbench-grid">
+          {selected.includes("display") ? (
+            <article className="workbench-card cardputer-display-widget">
+              <div className="widget-heading"><div><Monitor size={18} /><strong>{c("数字孪生屏幕", "Digital Twin Display")}</strong></div><span>240 × 135 · r{twin.screen.revision}</span></div>
+              <div className="cardputer-screen" style={{ background: twin.screen.background }}>
+                {twin.screen.lines.map((line, index) => <span key={`${index}-${line}`}>{line || "\u00a0"}</span>)}
+              </div>
+            </article>
+          ) : null}
+
+          {selected.includes("keyboard") ? (
+            <article className="workbench-card cardputer-keyboard-widget">
+              <div className="widget-heading"><div><KeyboardIcon size={18} /><strong>{c("56 键映射", "56-key Map")}</strong></div><span role="status" aria-live="polite">{twin.keys.pressed.length ? c(`${twin.keys.pressed.length} 键按下`, `${twin.keys.pressed.length} pressed`) : c("等待按键", "Waiting for keys")}</span></div>
+              <div className="cardputer-keyboard-scroll">
+                <div className="cardputer-keyboard" aria-label={c("Cardputer ADV 实时按键映射", "Live Cardputer ADV keyboard map")}>
+                  {cardputerAdvKeyRows.flatMap((row, rowIndex) => row.map((label, columnIndex) => {
+                    const key = label === "space" ? "space" : label.split(" ")[0];
+                    const pressed = twin.keys.pressed.includes(key);
+                    return <span data-key={key} className={pressed ? "cardputer-key pressed" : "cardputer-key"} key={`${rowIndex}-${columnIndex}`}>{label}</span>;
+                  }))}
+                </div>
+              </div>
+              <small className="cardputer-keyboard-hint">{c("左右滑动查看全部按键", "Swipe sideways to see every key")}</small>
+            </article>
+          ) : null}
+
           {selected.includes("camera") ? (
             <article className="workbench-card camera-widget">
               <div className="widget-heading"><div><Camera size={18} /><strong>{c("摄像头与视觉识别", "Camera & Vision")}</strong></div><span className="widget-state"><i />{isDemo ? c("演示画面", "Demo feed") : c("等待视频", "Waiting for video")}</span></div>

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-const flashMethodSchema = z.enum(["swd", "bluetooth"]);
+const flashMethodSchema = z.enum(["swd", "usb", "bluetooth"]);
 const localizedTextSchema = z.object({ zh: z.string().min(1), en: z.string().min(1) });
 const portSchema = z.object({ port: z.string().min(1), version: z.string().min(1) });
 const requiredPortSchema = portSchema.extend({ count: z.number().int().positive().default(1) });
@@ -23,7 +23,7 @@ const moduleBaseSchema = z.object({
   buildFeatures: z.array(z.string().regex(/^[a-z0-9][a-z0-9.-]*$/)).default([]),
 });
 const foundationModuleSchema = moduleBaseSchema.extend({ kind: z.literal("foundation") });
-const capabilityModuleSchema = moduleBaseSchema.extend({ kind: z.literal("capability"), defaultEnabled: z.boolean() });
+const capabilityModuleSchema = moduleBaseSchema.extend({ kind: z.literal("capability"), defaultEnabled: z.boolean(), required: z.boolean().default(false) });
 const connectionModuleSchema = moduleBaseSchema.extend({
   kind: z.literal("connection"),
   defaultEnabled: z.boolean(),
@@ -186,7 +186,7 @@ export function resolveFirmwareConfiguration(
     const module = byId.get(moduleId);
     if (!module || module.kind === "foundation") throw new Error(`当前硬件不支持固件模块：${moduleId}`);
   }
-  for (const module of adapter.modules.connections.filter((candidate) => candidate.required && supportsTarget(candidate, target.id))) selected.add(module.id);
+  for (const module of selectable.filter((candidate) => candidate.required)) selected.add(module.id);
   const queue = [...selected];
   while (queue.length) {
     const module = byId.get(queue.shift()!);

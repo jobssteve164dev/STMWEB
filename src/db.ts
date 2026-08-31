@@ -33,7 +33,7 @@ export interface FirmwareVersionRecord {
   sha256: string;
   hardwareProfileId: string | null;
   artifactRole: "complete-image" | "application" | "unclassified";
-  flashMethods: Array<"swd" | "bluetooth">;
+  flashMethods: Array<"swd" | "usb" | "bluetooth">;
   flashSize: number | null;
   applicationBase: number | null;
   applicationLimit: number | null;
@@ -59,9 +59,7 @@ export interface DeviceRecord {
   note: string;
 }
 
-export type WorkbenchComponentId =
-  | "orientation" | "camera" | "motor" | "battery" | "chart"
-  | "terminal" | "controls" | "events" | "firmware";
+export type WorkbenchComponentId = DeviceCapabilityType;
 
 export interface BuildRunnerRecord {
   id: string;
@@ -92,7 +90,7 @@ export interface FirmwareConfiguration {
   foundationModules: string[];
   capabilityModules: string[];
   connectionModules: string[];
-  flashMethods: Array<"swd" | "bluetooth">;
+  flashMethods: Array<"swd" | "usb" | "bluetooth">;
   runtimeTransports: string[];
   components: Array<{
     id: string;
@@ -122,7 +120,7 @@ export interface FirmwareModuleRecord {
   buildFeatures: string[];
   defaultEnabled?: boolean;
   required?: boolean;
-  flashMethod?: "swd" | "bluetooth";
+  flashMethod?: "swd" | "usb" | "bluetooth";
   runtimeTransport?: string;
 }
 
@@ -168,7 +166,7 @@ export interface HardwareTemplateRecord {
   target: string;
   targetLabel: string;
   flashSize: number;
-  flashMethods: Array<"swd" | "bluetooth">;
+  flashMethods: Array<"swd" | "usb" | "bluetooth">;
   foundationModules: FirmwareModuleRecord[];
   capabilityModules: FirmwareModuleRecord[];
   connectionModules: FirmwareModuleRecord[];
@@ -339,14 +337,13 @@ export async function createBuildJob(input: {
   runnerId: string;
   name: string;
   hardwareProjectId: string;
-  source: File;
+  source?: File;
 }): Promise<{ id: string; sha256: string }> {
   const form = new FormData();
   form.set("runnerId", input.runnerId);
   form.set("name", input.name);
-  form.set("profile", "stm32-cmake-gcc-v1");
   form.set("hardwareProjectId", input.hardwareProjectId);
-  form.set("source", input.source, input.source.name);
+  if (input.source) form.set("source", input.source, input.source.name);
   return requestJson(`/api/workspaces/${workspaceId()}/builds`, { method: "POST", body: form });
 }
 
@@ -361,3 +358,4 @@ export async function publishFirmwarePackage(packageId: string): Promise<void> {
 export function buildArtifactUrl(jobId: string, artifactId: string): string {
   return `/api/workspaces/${workspaceId()}/builds/${jobId}/artifacts/${artifactId}`;
 }
+import type { DeviceCapabilityType } from "./device-capabilities.js";

@@ -1,5 +1,5 @@
 export type FirmwareArtifactRole = "complete-image" | "application";
-export type FirmwareFlashMethod = "swd" | "bluetooth";
+export type FirmwareFlashMethod = "swd" | "usb" | "bluetooth";
 
 interface DotFirmwareArtifact {
   role: FirmwareArtifactRole;
@@ -49,7 +49,7 @@ function parseManifest(value: unknown): DotFirmwareManifest {
     const artifacts = candidate.artifacts.map((artifact) => {
       if (!isRecord(artifact) || (artifact.role !== "complete-image" && artifact.role !== "application")
         || (artifact.format !== "ihex" && artifact.format !== "bin") || !Array.isArray(artifact.flashMethods)
-        || !artifact.flashMethods.every((method) => method === "swd" || method === "bluetooth")
+        || !artifact.flashMethods.every((method) => method === "swd" || method === "usb" || method === "bluetooth")
         || typeof artifact.url !== "string" || !artifact.url.startsWith("/firmware/")
         || typeof artifact.size !== "number" || typeof artifact.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(artifact.sha256)) {
         throw new Error("内置 DOT 固件清单包含无效制品");

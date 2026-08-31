@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, compilerImageTest, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, packageManifest, bootloader] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, compilerImageTest, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, cardputerAdapter, packageManifest, bootloader, serverEnv, compose, envExample] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
@@ -17,16 +17,24 @@ const [workflow, release, installer, packageInstaller, packageBuilder, packageVe
   read(".dockerignore"),
   read("contracts/compiler-environment.schema.json"),
   read("firmware-adapters/dot-v1/adapter.json"),
+  read("firmware-adapters/cardputer-adv/adapter.json"),
   read("firmware-adapters/dot-v1/write-package-manifest.mjs"),
   read("firmware-adapters/dot-v1/stmweb_bootloader.c"),
+  read("server/env.ts"),
+  read("docker-compose.yml"),
+  read(".env.example"),
 ]);
 
 JSON.parse(schema);
 const adapterContract = JSON.parse(adapter);
+const cardputerContract = JSON.parse(cardputerAdapter);
 assert.equal(adapterContract.adapterId, "stmweb.dot-v1");
 assert.deepEqual(adapterContract.targets.map((target) => target.id), ["stm32f103c8", "stm32f103cb"]);
 assert.equal(adapterContract.modules.connections.find((module) => module.id === "connection.bluetooth")?.buildFeatures.includes("dot.bluetooth-update"), true);
 assert.equal(adapterContract.targets.every((target) => target.resources.some((resource) => resource.id === "board.usart3")), true);
+assert.equal(cardputerContract.adapterId, "stmweb.cardputer-adv");
+assert.equal(cardputerContract.buildProfile, "esp32s3-idf-v1");
+assert.deepEqual(cardputerContract.targets.map((target) => target.id), ["esp32s3fn8"]);
 assert.match(workflow, /platforms: linux\/amd64/);
 assert.match(workflow, /load: true[\s\S]*provenance: false[\s\S]*sbom: false/);
 assert.match(workflow, /build-compiler-environment-release\.sh/);
@@ -52,6 +60,7 @@ assert.match(compilerImageTest, /docker cp "\$SOURCE_ROOT\/\."/);
 assert.match(compilerImageTest, /for target in stm32f103cb stm32f103c8/);
 assert.match(compilerImageTest, /cmake --build "\$output" --parallel 1/);
 assert.match(compilerImageTest, /verify-dot-initial-firmware\.mjs/);
+assert.match(compilerImageTest, /cardputer_adv_ota\.bin/);
 assert.match(packageInstaller, /--code-file \/run\/stmweb-pairing-code/);
 assert.doesNotMatch(packageInstaller, /--code \"\$PAIRING_CODE\"/);
 assert.match(packageInstaller, /EXISTING_REGISTRATION/);
@@ -65,6 +74,14 @@ assert.match(runner, /adapterBuildDirectory/);
 assert.match(runner, /path\.join\(stateDir, \"build-history\"\)/);
 assert.match(runner, /stmweb_firmware_manifest\.json/);
 assert.match(runner, /STMWEB_COMPOSITION_FILE/);
+assert.match(runner, /esp32s3-idf-v1/);
+assert.match(runner, /idf\.py/);
+assert.match(runner, /stmweb\/compiler:v0\.2\.0/);
+assert.match(serverEnv, /stmweb\/compiler:v0\.2\.0/);
+assert.match(compose, /stmweb\/compiler:v0\.2\.0/);
+assert.match(envExample, /stmweb\/compiler:v0\.2\.0/);
+assert.match(installer, /ESP-IDF 5\.4\.2/);
+assert.match(packageInstaller, /ESP-IDF 5\.4\.2/);
 assert.match(runner, /compositionSha256/);
 assert.match(runner, /canonicalJson\(content\)/);
 assert.match(runner, /firmware-manifest\.json/);
@@ -79,6 +96,7 @@ assert.match(packageManifest, /stmweb_firmware_manifest\.json/);
 assert.match(bootloader, /receiveFrames\(0u\);\s+return 0;/);
 assert.match(dockerfile, /FROM node:22-bookworm-slim/);
 assert.match(dockerfile, /FROM docker:27-cli AS docker_cli/);
+assert.match(dockerfile, /FROM espressif\/idf:v5\.4\.2 AS esp_idf/);
 assert.match(dockerfile, /unzip/);
 assert.match(dockerignore, /^\*\.tar\.gz$/m);
 process.stdout.write("compiler environment contract ok\n");

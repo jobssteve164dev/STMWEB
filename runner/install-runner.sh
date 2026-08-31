@@ -26,6 +26,8 @@ docker run --rm --entrypoint node "$BUILD_IMAGE" -e 'process.exit(Number(process
   || { echo "编译环境缺少 Node.js 22" >&2; exit 1; }
 docker run --rm --entrypoint unzip "$BUILD_IMAGE" -v >/dev/null \
   || { echo "编译环境缺少 unzip" >&2; exit 1; }
+docker run --rm "$BUILD_IMAGE" sh -lc '. /opt/esp/idf/export.sh >/dev/null && idf.py --version' \
+  || { echo "编译环境缺少 ESP-IDF 5.4.2" >&2; exit 1; }
 
 INSTALL_ROOT="/opt/stmweb-runner"
 STATE_ROOT="/var/lib/stmweb-runner"

@@ -305,7 +305,7 @@ export async function requestHardwareConnection(
 
       return {
         kind,
-        name: device.name || browserCopy("ECB02 蓝牙设备", "ECB02 Bluetooth device"),
+        name: device.name || browserCopy("蓝牙设备", "Bluetooth device"),
         detail: browserCopy("蓝牙数据通道已连接", "Bluetooth data channel connected"),
         setDataHandler: (handler) => { dataHandler = handler; },
         write: async (data) => {

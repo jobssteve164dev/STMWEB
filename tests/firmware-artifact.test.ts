@@ -58,3 +58,57 @@ test("finds an embedded configuration payload in application and complete images
   const complete = new TextEncoder().encode(source.replace(":00000001FF", `${record}\n:00000001FF`));
   assert.equal(firmwareContainsPayload(complete, "complete.hex", registered.target, payload), true);
 });
+
+test("classifies Cardputer ADV application and complete ESP32-S3 images from verified bytes", () => {
+  const marker = new TextEncoder().encode("STMWEB_ADAPTER:stmweb.cardputer-adv");
+  const espImage = (payload: Uint8Array) => {
+    const header = new Uint8Array(24);
+    header.set([0xe9, 1, 2, 0]);
+    new DataView(header.buffer).setUint32(4, 0x40370000, true);
+    new DataView(header.buffer).setUint16(12, 9, true);
+    const segment = new Uint8Array(8);
+    new DataView(segment.buffer).setUint32(0, 0x3c000020, true);
+    new DataView(segment.buffer).setUint32(4, payload.byteLength, true);
+    const body = Uint8Array.from([...header, ...segment, ...payload]);
+    const image = new Uint8Array((body.byteLength + 16) & ~15);
+    image.set(body);
+    image[image.byteLength - 1] = payload.reduce((value, byte) => value ^ byte, 0xef);
+    return image;
+  };
+  const application = espImage(Uint8Array.from([...marker, ...new Uint8Array(96)]));
+  const expected = { hardwareProfileId: "stmweb.cardputer-adv", adapterVersion: "1", target: "esp32s3fn8" };
+  const applicationDescriptor = inspectFirmwareArtifact(application, "cardputer_adv_ota.bin", expected);
+  assert.equal(applicationDescriptor.hardwareProfileId, "stmweb.cardputer-adv");
+  assert.equal(applicationDescriptor.artifactRole, "application");
+  assert.deepEqual(applicationDescriptor.flashMethods, ["usb", "bluetooth"]);
+  assert.equal(applicationDescriptor.applicationBase, 0x40000);
+
+  const complete = new Uint8Array(0x40000 + application.byteLength).fill(0xff);
+  complete.set(espImage(new Uint8Array([1, 2, 3, 4])), 0);
+  complete.set([0xaa, 0x50, 0x01, 0x00], 0x8000);
+  new DataView(complete.buffer).setUint32(0x8004, 0xe000, true);
+  new DataView(complete.buffer).setUint32(0x8008, 0x2000, true);
+  complete.set([0xaa, 0x50, 0x00, 0x10], 0x8020);
+  new DataView(complete.buffer).setUint32(0x8024, 0x40000, true);
+  new DataView(complete.buffer).setUint32(0x8028, 0x3a0000, true);
+  complete.set([0xaa, 0x50, 0x00, 0x11], 0x8040);
+  new DataView(complete.buffer).setUint32(0x8044, 0x3e0000, true);
+  new DataView(complete.buffer).setUint32(0x8048, 0x3a0000, true);
+  complete.set(application, 0x40000);
+  const completeDescriptor = inspectFirmwareArtifact(complete, "cardputer_adv_complete.bin", expected);
+  assert.equal(completeDescriptor.hardwareProfileId, "stmweb.cardputer-adv");
+  assert.equal(completeDescriptor.artifactRole, "complete-image");
+  assert.deepEqual(completeDescriptor.flashMethods, ["usb"]);
+
+  const missingOtaSlot = complete.slice();
+  missingOtaSlot.fill(0xff, 0x8040, 0x8060);
+  assert.equal(inspectFirmwareArtifact(missingOtaSlot, "missing-ota-slot.bin", expected).artifactRole, "unclassified");
+
+  const damaged = application.slice();
+  damaged[damaged.byteLength - 1] ^= 0xff;
+  assert.equal(inspectFirmwareArtifact(damaged, "damaged.bin", expected).artifactRole, "unclassified");
+
+  const wrongChip = application.slice();
+  new DataView(wrongChip.buffer).setUint16(12, 0, true);
+  assert.equal(inspectFirmwareArtifact(wrongChip, "wrong-chip.bin", expected).artifactRole, "unclassified");
+});

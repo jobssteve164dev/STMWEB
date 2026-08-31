@@ -8,7 +8,7 @@ const manifestArtifactSchema = z.object({
   buildFile: z.string().min(1),
   role: z.enum(["complete-image", "application"]),
   format: z.enum(["ihex", "bin"]),
-  flashMethods: z.array(z.enum(["swd", "bluetooth"])).min(1),
+  flashMethods: z.array(z.enum(["swd", "usb", "bluetooth"])).min(1),
   size: z.number().int().positive(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
 });

@@ -36,3 +36,16 @@ test("recommendations exclude offline hardware and include session essentials", 
   assert.equal(selected.includes("events"), true);
   assert.equal(selected.includes("firmware"), true);
 });
+
+test("accepts display and keyboard capabilities reported by interactive hardware", () => {
+  const manifest = parseCapabilityManifest(`STMWEB_CAPS:${JSON.stringify({
+    schemaVersion: 1,
+    device: { id: "cardputer-adv", model: "M5Stack Cardputer ADV", firmwareVersion: "1.0.0" },
+    capabilities: [
+      { id: "screen", type: "display", label: "数字孪生屏幕", status: "online", channels: ["screen"] },
+      { id: "keyboard", type: "keyboard", label: "56 键键盘", status: "online", channels: ["pressed", "modifiers"] },
+    ],
+  })}\n`);
+  assert.ok(manifest);
+  assert.deepEqual(recommendedComponents(manifest).slice(0, 2), ["display", "keyboard"]);
+});

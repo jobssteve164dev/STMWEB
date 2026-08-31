@@ -4,6 +4,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
 import { DotFirmwareFlashPanel } from "../src/DotFirmwareFlashPanel.js";
+import { CardputerAdvFirmwareFlashPanel } from "../src/CardputerAdvFirmwareFlashPanel.js";
 import { BuildRunnerPanel } from "../src/BuildRunnerPanel.js";
 import { SwdFlashPanel } from "../src/InitialSwdFlashPanel.js";
 import { HardwareGatewayPanel } from "../src/HardwareGatewayPanel.js";
@@ -58,13 +59,51 @@ test("lists only compatible application images in Bluetooth flashing", () => {
   assert.doesNotMatch(html, /unverified\.bin/);
 });
 
-test("renders the phase C firmware composer using user actions", () => {
+test("offers only verified Cardputer ADV applications in wireless flashing", () => {
+  const cardputerApplication = firmware({
+    id: "cardputer-application",
+    fileName: "cardputer-adv-ota.bin",
+    hardwareProfileId: "stmweb.cardputer-adv",
+    flashMethods: ["usb", "bluetooth"] as FirmwareVersionRecord["flashMethods"],
+    flashSize: 8 * 1024 * 1024,
+    applicationBase: 0x40000,
+    applicationLimit: 0x3e0000,
+  });
+  const html = renderToStaticMarkup(React.createElement(CardputerAdvFirmwareFlashPanel, {
+    connection: null,
+    firmwareVersions: [application, cardputerApplication, draft],
+    onEvent: () => undefined,
+  }));
+  assert.match(html, /Cardputer ADV 无线升级/);
+  assert.match(html, /cardputer-adv-ota\.bin/);
+  assert.doesNotMatch(html, /dot-application\.bin/);
+  assert.doesNotMatch(html, /unverified\.bin/);
+});
+
+test("renders the phase C firmware composer using user actions", async () => {
   const html = renderToStaticMarkup(React.createElement(BuildRunnerPanel, { proAccess: true }));
   assert.match(html, /标准固件生成/);
   assert.match(html, /组装标准固件/);
   assert.match(html, /启动、恢复和校验模块由平台自动完成/);
   assert.match(html, /选择板卡后，即可配置这份固件的功能和连接方式/);
   assert.doesNotMatch(html, /固定适配与运行时版本/);
+  const source = await readFile("src/BuildRunnerPanel.tsx", "utf8");
+  assert.match(source, /首次安装、恢复和无线升级已经包含在这份固件中/);
+});
+
+test("does not ask Cardputer ADV users for an unrelated source archive", async () => {
+  const source = await readFile("src/BuildRunnerPanel.tsx", "utf8");
+  assert.match(source, /hardwareProfileId !== "stmweb\.cardputer-adv"/);
+  const runner = await readFile("runner/stmweb-runner.mjs", "utf8");
+  const cardputerBranch = runner.slice(runner.indexOf('job.hardwareProfileId === "stmweb.cardputer-adv"'), runner.indexOf("} else if (!hasCmake)"));
+  assert.doesNotMatch(cardputerBranch, /STMWEB_SOURCE_ROOT/);
+});
+
+test("gives a new Cardputer owner an executable first USB install path", async () => {
+  const source = await readFile("src/BuildRunnerPanel.tsx", "utf8");
+  assert.match(source, /首次安装到 Cardputer ADV/);
+  assert.match(source, /按住顶部 G0/);
+  assert.match(source, /python -m esptool --chip esp32s3 write_flash 0x0/);
 });
 
 test("shows only named firmware downloads as primary actions and keeps technical files in details", async () => {

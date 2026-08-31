@@ -21,6 +21,7 @@ const upload = multer({
   limits: { fileSize: 32 * 1024 * 1024, files: 1 },
 });
 const sourceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024, files: 1 } });
+const cardputerStandardSource = Buffer.from("UEsDBAoAAAAAAMQDH10AAAAAAAAAAAAAAAAGABwAUkVBRE1FVVQJAAMPy5RqD8uUanV4CwABBOkDAAAE6QMAAFBLAQIeAwoAAAAAAMQDH10AAAAAAAAAAAAAAAAGABgAAAAAAAAAAACkgQAAAABSRUFETUVVVAUAAw/LlGp1eAsAAQTpAwAABOkDAABQSwUGAAAAAAEAAQBMAAAAQAAAAAAA", "base64");
 
 const uuid = z.string().uuid();
 const sessionSchema = z.object({
@@ -565,11 +566,10 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   const workspaceId = uuid.parse(request.params.workspaceId);
   requireConnectionWorkspace(request, workspaceId);
   await requireWorkspace(user.id, workspaceId, true);
-  if (!request.file) { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
   const input = z.object({
     runnerId: uuid,
     name: z.string().trim().min(1).max(160),
-    profile: z.literal("stm32-cmake-gcc-v1"),
+    profile: z.enum(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]).optional(),
     hardwareProjectId: uuid.optional(),
     target: z.enum(["stm32f103c8", "stm32f103cb"]).optional(),
   }).refine((value) => value.hardwareProjectId || value.target, { message: "请选择硬件项目" }).parse(request.body);
@@ -604,9 +604,10 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   }
   if (!hardwareProject) { response.status(400).json({ error: "请选择当前工作区中的硬件项目" }); return; }
   const registered = getFirmwareAdapterTarget(hardwareProject.hardwareProfileId, hardwareProject.adapterVersion, hardwareProject.target);
-  if (!registered || registered.adapter.runtimeVersion !== hardwareProject.runtimeVersion || registered.adapter.buildProfile !== input.profile) {
+  if (!registered || registered.adapter.runtimeVersion !== hardwareProject.runtimeVersion || (input.profile && registered.adapter.buildProfile !== input.profile)) {
     response.status(409).json({ error: "硬件项目使用的适配版本当前不可生成" }); return;
   }
+  if (!request.file && registered.adapter.adapterId !== "stmweb.cardputer-adv") { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
   const savedConfiguration = hardwareProject.firmwareConfiguration as { capabilityModules?: unknown; connectionModules?: unknown } | null;
   const selectedModuleIds = savedConfiguration && Array.isArray(savedConfiguration.capabilityModules) && Array.isArray(savedConfiguration.connectionModules)
     ? [...savedConfiguration.capabilityModules, ...savedConfiguration.connectionModules].filter((item): item is string => typeof item === "string")
@@ -614,13 +615,15 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   let firmwareConfiguration;
   try { firmwareConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, selectedModuleIds); }
   catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : "硬件项目的固件配置已不可用" }); return; }
-  const sha256 = createHash("sha256").update(request.file.buffer).digest("hex");
+  const sourceContent = request.file?.buffer ?? cardputerStandardSource;
+  const sourceName = request.file?.originalname ?? "cardputer-adv-standard-firmware.zip";
+  const sha256 = createHash("sha256").update(sourceContent).digest("hex");
   const result = await pool.query<{ id: string }>(
     `INSERT INTO build_jobs
        (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,firmware_configuration,source_name,source_sha256,source_content)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13) RETURNING id`,
-    [workspaceId,input.runnerId,hardwareProject.id,user.id,input.name,input.profile,hardwareProject.target,
-      hardwareProject.adapterVersion,hardwareProject.runtimeVersion,JSON.stringify(firmwareConfiguration),request.file.originalname,sha256,request.file.buffer],
+    [workspaceId,input.runnerId,hardwareProject.id,user.id,input.name,registered.adapter.buildProfile,hardwareProject.target,
+      hardwareProject.adapterVersion,hardwareProject.runtimeVersion,JSON.stringify(firmwareConfiguration),sourceName,sha256,sourceContent],
   );
   response.status(201).json({ id: result.rows[0].id, sha256 });
 }));

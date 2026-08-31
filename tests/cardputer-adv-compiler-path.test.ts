@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+test("routes Cardputer ADV builds through the pinned ESP-IDF compiler environment", () => {
+  const runner = readFileSync("runner/stmweb-runner.mjs", "utf8");
+  const image = readFileSync("runner/image/Dockerfile", "utf8");
+  const smoke = readFileSync("scripts/test-firmware-compiler-image.sh", "utf8");
+  const ota = readFileSync("firmware-adapters/cardputer-adv/main/cardputer_ble_ota.c", "utf8");
+  const sdkconfig = readFileSync("firmware-adapters/cardputer-adv/sdkconfig.defaults", "utf8");
+  const packageManifest = readFileSync("firmware-adapters/cardputer-adv/write-package-manifest.mjs", "utf8");
+  assert.match(runner, /esp32s3-idf-v1/);
+  assert.match(runner, /idf\.py[\s\S]*STMWEB_COMPOSITION_FILE/);
+  assert.match(runner, /hardwareProfileId === "stmweb\.cardputer-adv"/);
+  assert.match(image, /espressif\/idf:v5\.4\.2/);
+  assert.match(smoke, /cardputer-adv/);
+  assert.match(smoke, /cardputer_adv_ota\.bin/);
+  assert.match(smoke, /stmweb_firmware_manifest\.json/);
+  assert.match(ota, /command == OTA_COMMIT \? 0 : ota_offset/);
+  assert.match(ota, /write_u32_le\(response \+ 3, acknowledged_offset\)/);
+  assert.match(ota, /BLE_GATT_CHR_F_WRITE_ENC/);
+  assert.match(ota, /cardputer_hardware_consume_ota_authorization\(\)/);
+  assert.match(ota, /ble_hs_cfg\.sm_sc = 1/);
+  assert.match(ota, /ble_store_config_init\(\)/);
+  assert.match(ota, /case BLE_GAP_EVENT_DISCONNECT:[\s\S]*ota_abort\(\)/);
+  assert.match(sdkconfig, /CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y/);
+  assert.match(packageManifest, /esptool[\s\S]*image_info/);
+  assert.match(packageManifest, /assertCompleteLayout/);
+  assert.doesNotMatch(packageManifest, /"ota-sha256"/);
+});

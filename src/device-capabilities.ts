@@ -1,4 +1,6 @@
 export type DeviceCapabilityType =
+  | "display"
+  | "keyboard"
   | "orientation"
   | "camera"
   | "motor"
@@ -32,6 +34,8 @@ export interface DeviceCapabilityManifest {
 }
 
 export const componentLabels: Record<DeviceCapabilityType, string> = {
+  display: "数字孪生屏幕",
+  keyboard: "56 键映射",
   orientation: "姿态与陀螺仪",
   camera: "摄像头与视觉识别",
   motor: "电机与编码器",

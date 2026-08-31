@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "stmweb.cardputer-adv",
+  "adapterVersion": "1",
+  "runtimeVersion": "1",
+  "label": "M5Stack Cardputer ADV",
+  "buildProfile": "esp32s3-idf-v1",
+  "buildDirectory": "cardputer-adv",
+  "runtime": {
+    "debugProtocol": "1",
+    "bootProtocol": "1",
+    "transports": ["usb-serial", "bluetooth-gatt"]
+  },
+  "modules": {
+    "foundation": [
+      {
+        "id": "platform.boot-recovery", "kind": "foundation",
+        "label": { "zh": "启动与恢复", "en": "Boot & recovery" },
+        "description": { "zh": "提供 USB 恢复和失败自动回退的双分区启动。", "en": "Provides USB recovery and dual-partition boot with automatic rollback." },
+        "provides": [{ "port": "platform.recovery", "version": "1" }]
+      },
+      {
+        "id": "platform.device-identity", "kind": "foundation",
+        "label": { "zh": "设备身份", "en": "Device identity" },
+        "description": { "zh": "写入 Cardputer ADV 与固件身份。", "en": "Embeds Cardputer ADV and firmware identity." },
+        "provides": [{ "port": "platform.identity", "version": "1" }]
+      },
+      {
+        "id": "platform.debug-safety", "kind": "foundation",
+        "label": { "zh": "调试与安全", "en": "Debug & safety" },
+        "description": { "zh": "提供能力发现、完整性校验和升级确认。", "en": "Provides capability discovery, integrity validation and update confirmation." },
+        "provides": [{ "port": "platform.safe-stop", "version": "1" }, { "port": "platform.capability-discovery", "version": "1" }]
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "capability.display-twin", "kind": "capability",
+        "label": { "zh": "数字孪生屏幕", "en": "Digital twin display" },
+        "description": { "zh": "在调试台同步查看 240 × 135 屏幕内容。", "en": "Mirrors the 240 × 135 display in the workbench." },
+        "defaultEnabled": true, "required": true,
+        "provides": [{ "port": "state.display", "version": "1" }],
+        "resources": [{ "kind": "display", "role": "内置屏幕", "exclusive": true }],
+        "buildFeatures": ["cardputer.display-twin"]
+      },
+      {
+        "id": "capability.keyboard-map", "kind": "capability",
+        "label": { "zh": "按键映射", "en": "Keyboard mapping" },
+        "description": { "zh": "同步 56 键、组合键和 Fn 方向键状态。", "en": "Mirrors all 56 keys, modifiers and Fn arrows." },
+        "defaultEnabled": true, "required": true,
+        "provides": [{ "port": "input.keyboard", "version": "1" }],
+        "resources": [{ "kind": "keyboard", "role": "内置键盘", "exclusive": true }],
+        "buildFeatures": ["cardputer.keyboard-map"]
+      },
+      {
+        "id": "capability.battery", "kind": "capability",
+        "label": { "zh": "电池状态", "en": "Battery status" },
+        "description": { "zh": "显示内置电池电压。", "en": "Shows the built-in battery voltage." },
+        "defaultEnabled": true, "required": true,
+        "provides": [{ "port": "state.battery", "version": "1" }]
+      }
+    ],
+    "connections": [
+      {
+        "id": "connection.usb", "kind": "connection",
+        "label": { "zh": "USB 安装与恢复", "en": "USB installation & recovery" },
+        "description": { "zh": "用于首次安装和无法无线启动时的恢复。", "en": "Used for first installation and recovery when wireless boot is unavailable." },
+        "defaultEnabled": true, "required": true, "flashMethod": "usb", "runtimeTransport": "usb-serial",
+        "provides": [{ "port": "firmware.flash.usb", "version": "1" }]
+      },
+      {
+        "id": "connection.bluetooth", "kind": "connection",
+        "label": { "zh": "蓝牙无线升级", "en": "Bluetooth wireless updates" },
+        "description": { "zh": "通过浏览器蓝牙校验并更新应用分区。", "en": "Validates and updates the application partition over browser Bluetooth." },
+        "defaultEnabled": true, "required": true, "flashMethod": "bluetooth", "runtimeTransport": "bluetooth-gatt",
+        "provides": [{ "port": "firmware.update.application", "version": "1" }],
+        "requiresPorts": [{ "port": "platform.safe-stop", "version": "1", "count": 1 }],
+        "resources": [{ "kind": "wireless", "role": "内置蓝牙", "exclusive": true }],
+        "buildFeatures": ["cardputer.bluetooth-ota"]
+      }
+    ]
+  },
+  "targets": [{
+    "id": "esp32s3fn8", "label": "ESP32-S3FN8 · 8 MB", "mcuFamily": "esp32s3", "deviceIds": [9],
+    "flashSize": 8388608, "applicationBase": 262144, "applicationLimit": 4063232,
+    "applicationLinkerScript": "partitions.csv", "bootloaderLinkerScript": "sdkconfig.defaults",
+    "deviceDefine": "CONFIG_IDF_TARGET_ESP32S3", "compactRuntime": false,
+    "resources": [
+      { "id": "board.st7789v2", "kind": "display", "label": "ST7789V2 · 240 × 135", "shareable": false },
+      { "id": "board.tca8418", "kind": "keyboard", "label": "TCA8418 · 4 × 14", "shareable": false },
+      { "id": "soc.bluetooth", "kind": "wireless", "label": "ESP32-S3 BLE", "shareable": false }
+    ],
+    "artifacts": [
+      { "buildFile": "cardputer_adv_complete.bin", "role": "complete-image", "format": "bin", "flashMethods": ["usb"] },
+      { "buildFile": "cardputer_adv_ota.bin", "role": "application", "format": "bin", "flashMethods": ["usb", "bluetooth"] }
+    ]
+  }]
+}

@@ -78,3 +78,22 @@ test("binds the bluetooth component to a board UART and emits its real build fea
   assert.deepEqual(JSON.parse(readFileSync("tests/fixtures/dot-composition-wired.json", "utf8")), wired);
   assert.deepEqual(JSON.parse(readFileSync("tests/fixtures/dot-composition-bluetooth.json", "utf8")), bluetooth);
 });
+
+test("publishes Cardputer ADV as an ESP32-S3 board with display, keyboard and Bluetooth OTA", () => {
+  const registered = getFirmwareAdapterTarget("stmweb.cardputer-adv", "1", "esp32s3fn8");
+  assert.ok(registered);
+  assert.equal(registered.adapter.buildProfile, "esp32s3-idf-v1");
+  assert.equal(registered.target.flashSize, 8 * 1024 * 1024);
+  assert.deepEqual(registered.target.deviceIds, [0x0009]);
+  const configuration = resolveFirmwareConfiguration(registered.adapter, registered.target, [
+    "capability.display-twin", "capability.keyboard-map", "connection.usb", "connection.bluetooth",
+  ]);
+  assert.deepEqual(configuration.capabilityModules, ["capability.display-twin", "capability.keyboard-map", "capability.battery"]);
+  assert.deepEqual(configuration.connectionModules, ["connection.usb", "connection.bluetooth"]);
+  assert.deepEqual(configuration.flashMethods, ["usb", "bluetooth"]);
+  assert.deepEqual(configuration.runtimeTransports, ["usb-serial", "bluetooth-gatt"]);
+  assert.deepEqual(configuration.buildFeatures, ["cardputer.display-twin", "cardputer.keyboard-map", "cardputer.bluetooth-ota"]);
+  const requiredConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, []);
+  assert.deepEqual(requiredConfiguration.capabilityModules, ["capability.display-twin", "capability.keyboard-map", "capability.battery"]);
+  assert.deepEqual(requiredConfiguration.connectionModules, ["connection.usb", "connection.bluetooth"]);
+});

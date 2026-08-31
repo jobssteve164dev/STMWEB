@@ -7,9 +7,9 @@ import path from "node:path";
 
 const VERSION = "0.3.0";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
-const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.1.0";
+const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.2.0";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
-const allowedProfiles = new Set(["stm32-cmake-gcc-v1"]);
+const allowedProfiles = new Set(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]);
 let supportedAdapterTargetCache;
 
 function value(args, flag, fallback) {
@@ -72,7 +72,10 @@ function capabilities() {
     firmwareCompositionVersion: 2,
     maxConcurrentBuilds: 1,
     diskFreeMb,
-    toolchains: [{ id: "arm-none-eabi-gcc", version: "container-pinned", targets: supportedAdapterTargets().map((item) => item.target) }],
+    toolchains: [
+      { id: "arm-none-eabi-gcc", version: "container-pinned", targets: supportedAdapterTargets().filter((item) => item.hardwareProfileId === "stmweb.dot-v1").map((item) => item.target) },
+      { id: "esp-idf", version: "5.4.2", targets: supportedAdapterTargets().filter((item) => item.hardwareProfileId === "stmweb.cardputer-adv").map((item) => item.target) },
+    ],
   };
 }
 
@@ -226,8 +229,12 @@ async function execute(stateDir, state, job) {
     const cmake = path.join(source, "CMakeLists.txt");
     let cmakeSource = "/source";
     let sourceOptions = "";
+    let buildCommand;
     const hasCmake = await stat(cmake).then(() => true).catch(() => false);
-    if (!hasCmake) {
+    if (job.hardwareProfileId === "stmweb.cardputer-adv") {
+      cmakeSource = `/opt/stmweb/adapters/${job.adapterBuildDirectory}`;
+      buildCommand = `. /opt/esp/idf/export.sh >/dev/null && idf.py -C ${cmakeSource} -B /output/build -DSDKCONFIG=/output/sdkconfig -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} build`;
+    } else if (!hasCmake) {
       const project = spawnSync("find", [source, "-type", "f", "-path", "*/USER/DOT.uvprojx", "-print", "-quit"], { encoding: "utf8", timeout: 10_000 }).stdout.trim();
       if (!project) throw new Error("无法识别源码工程；请上传 CMake 工程或受支持的 Keil 工程");
       const projectRoot = path.dirname(path.dirname(project));
@@ -241,6 +248,7 @@ async function execute(stateDir, state, job) {
       cmakeSource = `/opt/stmweb/adapters/${job.adapterBuildDirectory}`;
       sourceOptions = ` -DSTMWEB_SOURCE_ROOT=${shellQuote(`/source/${relativeRoot.replaceAll("\\", "/")}`)}`;
     }
+    buildCommand ||= `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} && cmake --build /output/build --parallel 1`;
     if (!imageReady()) throw new Error("编译环境尚未由 GitOps Agent 正确安装或内容校验失败");
     await sendEvents(stateDir, state, job.id, job.leaseId, [event(job.id, "accepted", "Runner 已接收并校验源码"), event(job.id, "started", "开始编译")]);
     const args = [
@@ -248,7 +256,7 @@ async function execute(stateDir, state, job) {
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
       BUILD_IMAGE, "sh", "-lc",
-      `cmake -S ${cmakeSource} -B /output/build -G Ninja -DSTMWEB_TARGET=${job.target} -DSTMWEB_CONFIGURATION_SOURCE=/output/stmweb_firmware_configuration.c -DSTMWEB_COMPOSITION_FILE=/output/stmweb_firmware_composition.json${sourceOptions} && cmake --build /output/build --parallel 1`,
+      buildCommand,
     ];
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
     const log = [];

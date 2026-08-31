@@ -9,7 +9,7 @@ ENV IDF_PATH=/opt/esp/idf \
     IDF_PYTHON_CHECK_CONSTRAINTS=no
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi unzip \
+ && apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi cmake ninja-build unzip \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker

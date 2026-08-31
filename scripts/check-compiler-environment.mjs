@@ -105,6 +105,7 @@ assert.doesNotMatch(dockerfile, /COPY --from=esp_idf \/opt\/esp/);
 assert.match(dockerfile, /IDF_PATH=\/opt\/esp\/idf/);
 assert.match(dockerfile, /IDF_TOOLS_PATH=\/opt\/esp/);
 assert.match(dockerfile, /IDF_PYTHON_CHECK_CONSTRAINTS=no/);
+assert.match(dockerfile, /cmake ninja-build/);
 assert.match(dockerfile, /unzip/);
 assert.match(dockerignore, /^\*\.tar\.gz$/m);
 process.stdout.write("compiler environment contract ok\n");

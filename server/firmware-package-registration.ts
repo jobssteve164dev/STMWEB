@@ -33,6 +33,14 @@ interface BuildArtifactRow {
   content: Buffer;
 }
 
+export class FirmwarePackageValidationError extends Error {
+  readonly code = "invalid_firmware_package";
+}
+
+function invalidPackage(message: string): FirmwarePackageValidationError {
+  return new FirmwarePackageValidationError(message);
+}
+
 export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId: string): Promise<string> {
   const jobResult = await client.query<{
     workspaceId: string; hardwareProjectId: string | null; createdBy: string; name: string; profile: string; target: string;
@@ -47,13 +55,18 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   );
   const job = jobResult.rows[0];
   if (!job?.hardwareProjectId || !job.hardwareProfileId || !job.adapterVersion || !job.runtimeVersion) {
-    throw new Error("构建没有绑定可验证的硬件项目");
+    throw invalidPackage("构建没有绑定可验证的硬件项目");
   }
   const registered = getFirmwareAdapterTarget(job.hardwareProfileId, job.adapterVersion, job.target);
   if (!registered || registered.adapter.runtimeVersion !== job.runtimeVersion || registered.adapter.buildProfile !== job.profile) {
-    throw new Error("构建使用的硬件适配版本已不可用");
+    throw invalidPackage("构建使用的硬件适配版本已不可用");
   }
-  const firmwareConfiguration = verifyFirmwareComposition(job.firmwareConfiguration);
+  let firmwareConfiguration: ReturnType<typeof verifyFirmwareComposition>;
+  try {
+    firmwareConfiguration = verifyFirmwareComposition(job.firmwareConfiguration);
+  } catch {
+    throw invalidPackage("构建任务中的固件组合无效");
+  }
 
   const artifactResult = await client.query<BuildArtifactRow>(
     `SELECT name,kind,sha256,size::text,content FROM build_artifacts WHERE job_id=$1`,
@@ -61,16 +74,27 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
   );
   const byName = new Map(artifactResult.rows.map((artifact) => [artifact.name, artifact]));
   const manifestArtifact = byName.get("firmware-manifest.json");
-  if (!manifestArtifact || manifestArtifact.kind !== "report") throw new Error("Runner 没有提交标准固件清单");
-  const rawManifest = JSON.parse(manifestArtifact.content.toString("utf8")) as { composition?: unknown };
-  const manifest = generatedManifestSchema.parse(rawManifest);
+  if (!manifestArtifact || manifestArtifact.kind !== "report") throw invalidPackage("Runner 没有提交标准固件清单");
+  let rawManifest: { composition?: unknown };
+  let manifest: z.infer<typeof generatedManifestSchema>;
+  try {
+    rawManifest = JSON.parse(manifestArtifact.content.toString("utf8")) as { composition?: unknown };
+    manifest = generatedManifestSchema.parse(rawManifest);
+  } catch {
+    throw invalidPackage("Runner 提交的标准固件清单无效");
+  }
   const { adapter, target } = registered;
-  const expectedComposition = resolveFirmwareConfiguration(adapter, target, [
-    ...firmwareConfiguration.capabilityModules,
-    ...firmwareConfiguration.connectionModules,
-  ]);
+  let expectedComposition: ReturnType<typeof resolveFirmwareConfiguration>;
+  try {
+    expectedComposition = resolveFirmwareConfiguration(adapter, target, [
+      ...firmwareConfiguration.capabilityModules,
+      ...firmwareConfiguration.connectionModules,
+    ]);
+  } catch {
+    throw invalidPackage("构建任务中的固件组合无法由硬件适配解析");
+  }
   if (!sameFirmwareComposition(expectedComposition, firmwareConfiguration)) {
-    throw new Error("构建任务中的解析后组合图与硬件适配不一致");
+    throw invalidPackage("构建任务中的解析后组合图与硬件适配不一致");
   }
   if (manifest.adapter.id !== adapter.adapterId || manifest.adapter.version !== adapter.adapterVersion
     || manifest.hardware.profileId !== adapter.adapterId || manifest.hardware.revision !== adapter.adapterVersion
@@ -83,7 +107,7 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     || manifest.source.sha256 !== job.sourceSha256 || manifest.source.name !== job.sourceName
     || manifest.build.profile !== job.profile || manifest.build.target !== job.target
     || !sameFirmwareComposition(manifest.composition, firmwareConfiguration)) {
-    throw new Error("标准固件清单与构建任务不一致");
+    throw invalidPackage("标准固件清单与构建任务不一致");
   }
 
   for (const expected of target.artifacts) {
@@ -91,33 +115,44 @@ export async function registerGeneratedFirmwarePackage(client: PoolClient, jobId
     const expectedFlashMethods = expected.flashMethods.filter((method) => firmwareConfiguration.flashMethods.includes(method));
     if (!declared || declared.buildFile !== expected.buildFile || declared.format !== expected.format
       || declared.flashMethods.join(",") !== expectedFlashMethods.join(",")) {
-      throw new Error("标准固件清单的制品合同与硬件适配不一致");
+      throw invalidPackage("标准固件清单的制品合同与硬件适配不一致");
     }
   }
 
   const verifiedArtifacts = manifest.artifacts.map((descriptor) => {
     const artifact = byName.get(descriptor.buildFile);
-    if (!artifact) throw new Error(`标准固件包缺少 ${descriptor.role === "complete-image" ? "完整固件" : "应用固件"}`);
+    if (!artifact) throw invalidPackage(`标准固件包缺少 ${descriptor.role === "complete-image" ? "完整固件" : "应用固件"}`);
     const actualSha256 = createHash("sha256").update(artifact.content).digest("hex");
     if (Number(artifact.size) !== descriptor.size || artifact.sha256 !== descriptor.sha256 || actualSha256 !== descriptor.sha256) {
-      throw new Error(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
+      throw invalidPackage(`标准固件包中的 ${descriptor.buildFile} 未通过完整性校验`);
     }
     const configurationPayload = new TextEncoder().encode(`STMWEB_COMPOSITION:${JSON.stringify(rawManifest.composition)}`);
-    if (!firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload)) {
-      throw new Error(`标准固件包中的 ${descriptor.buildFile} 没有包含本次固件组合身份`);
+    let containsConfiguration: boolean;
+    try {
+      containsConfiguration = firmwareContainsPayload(artifact.content, descriptor.buildFile, target, configurationPayload);
+    } catch {
+      throw invalidPackage(`标准固件包中的 ${descriptor.buildFile} 无法解析`);
     }
-    const inspected = inspectFirmwareArtifact(artifact.content, descriptor.buildFile, {
-      hardwareProfileId: adapter.adapterId, adapterVersion: adapter.adapterVersion, target: target.id,
-    });
+    if (!containsConfiguration) {
+      throw invalidPackage(`标准固件包中的 ${descriptor.buildFile} 没有包含本次固件组合身份`);
+    }
+    let inspected: ReturnType<typeof inspectFirmwareArtifact>;
+    try {
+      inspected = inspectFirmwareArtifact(artifact.content, descriptor.buildFile, {
+        hardwareProfileId: adapter.adapterId, adapterVersion: adapter.adapterVersion, target: target.id,
+      });
+    } catch {
+      throw invalidPackage(`标准固件包中的 ${descriptor.buildFile} 无法解析`);
+    }
     if (inspected.hardwareProfileId !== adapter.adapterId || inspected.artifactRole !== descriptor.role
       || inspected.flashSize !== target.flashSize || inspected.applicationBase !== target.applicationBase
       || inspected.applicationLimit !== target.applicationLimit || inspected.runtimeVersion !== adapter.runtimeVersion
       || inspected.status !== "verified" || descriptor.flashMethods.some((method) => !inspected.flashMethods.includes(method))) {
-      throw new Error(`标准固件包中的 ${descriptor.buildFile} 与硬件适配不兼容`);
+      throw invalidPackage(`标准固件包中的 ${descriptor.buildFile} 与硬件适配不兼容`);
     }
     return { descriptor, artifact, inspected };
   });
-  if (new Set(verifiedArtifacts.map((item) => item.descriptor.role)).size !== 2) throw new Error("标准固件包的制品角色不完整");
+  if (new Set(verifiedArtifacts.map((item) => item.descriptor.role)).size !== 2) throw invalidPackage("标准固件包的制品角色不完整");
 
   const packageResult = await client.query<{ id: string }>(
     `INSERT INTO firmware_packages

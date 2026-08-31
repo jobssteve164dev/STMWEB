@@ -5,9 +5,9 @@ import { chmod, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:f
 import { homedir, hostname } from "node:os";
 import path from "node:path";
 
-const VERSION = "0.3.11";
+const VERSION = "0.3.12";
 const DEFAULT_STATE_DIR = path.join(homedir(), ".local", "state", "stmweb-runner");
-const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.11";
+const BUILD_IMAGE = process.env.STMWEB_BUILD_IMAGE || "stmweb/compiler:v0.3.12";
 const EXPECTED_IMAGE_ID = process.env.STMWEB_BUILD_IMAGE_ID || "";
 const allowedProfiles = new Set(["stm32-cmake-gcc-v1", "esp32s3-idf-v1"]);
 let supportedAdapterTargetCache;
@@ -56,6 +56,13 @@ async function saveState(stateDir, state) {
   await rename(temporary, target);
 }
 
+class ControlPlaneError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function request(state, route, init = {}) {
   const response = await fetch(new URL(route, state.controlUrl), {
     ...init,
@@ -63,7 +70,7 @@ async function request(state, route, init = {}) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `控制面返回 ${response.status}`);
+    throw new ControlPlaneError(response.status, body.error || `控制面返回 ${response.status}`);
   }
   const type = response.headers.get("content-type") || "";
   return type.includes("application/json") ? response.json() : Buffer.from(await response.arrayBuffer());
@@ -135,9 +142,16 @@ async function sendEvents(stateDir, state, jobId, leaseId, events) {
 async function flushEvents(stateDir, state) {
   while (state.pendingEvents.length) {
     const item = state.pendingEvents[0];
-    await request(state, `/api/runner/jobs/${item.jobId}/events`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leaseId: item.leaseId, events: item.events }),
-    });
+    try {
+      await request(state, `/api/runner/jobs/${item.jobId}/events`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leaseId: item.leaseId, events: item.events }),
+      });
+    } catch (error) {
+      if (!(error instanceof ControlPlaneError) || error.status !== 422 || !item.events.some((queuedEvent) => queuedEvent.type === "completed")) throw error;
+      item.events = [event(item.jobId, "failed", error.message)];
+      await saveState(stateDir, state);
+      continue;
+    }
     state.pendingEvents.shift();
     await saveState(stateDir, state);
   }
@@ -227,7 +241,7 @@ function canonicalFirmwareConfiguration(value) {
 function firmwareConfigurationSource(configuration) {
   const marker = Buffer.from(`STMWEB_COMPOSITION:${JSON.stringify(configuration)}\0`, "utf8");
   const values = [...marker].map((value) => `0x${value.toString(16).padStart(2, "0")}`).join(",");
-  return `#include <stdint.h>\n__attribute__((used,section(".stmweb_config"))) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
+  return `#include <stdint.h>\n__attribute__((used,retain,section(".stmweb_config"))) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
 }
 
 async function execute(stateDir, state, job) {

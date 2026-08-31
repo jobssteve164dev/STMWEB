@@ -51,12 +51,15 @@ CONTAINER_ID=$(docker create --platform linux/amd64 --entrypoint bash "$IMAGE" -
   idf.py -C /opt/stmweb/adapters/cardputer-adv \
     -B /tmp/stmweb-cardputer-adv \
     -DSDKCONFIG=/tmp/stmweb-cardputer-adv.sdkconfig \
+    -DSTMWEB_CONFIGURATION_SOURCE=/source/cardputer-adv-configuration.c \
     -DSTMWEB_COMPOSITION_FILE=/source/cardputer-adv-composition.json \
     build
   test -s /tmp/stmweb-cardputer-adv/cardputer_adv_complete.bin
   test -s /tmp/stmweb-cardputer-adv/cardputer_adv_ota.bin
   test -s /tmp/stmweb-cardputer-adv/stmweb_firmware_manifest.json
   grep -a -q "STMWEB_ADAPTER:stmweb.cardputer-adv" /tmp/stmweb-cardputer-adv/cardputer_adv_ota.bin
+  grep -a -q "STMWEB_COMPOSITION:compiler-smoke" /tmp/stmweb-cardputer-adv/cardputer_adv_ota.bin
+  grep -a -q "STMWEB_COMPOSITION:compiler-smoke" /tmp/stmweb-cardputer-adv/cardputer_adv_complete.bin
   node -e "const fs=require(\"fs\");const m=JSON.parse(fs.readFileSync(\"/tmp/stmweb-cardputer-adv/stmweb_firmware_manifest.json\"));if(m.adapter.id!==\"stmweb.cardputer-adv\"||m.hardware.target!==\"esp32s3fn8\"||m.artifacts.length!==2)process.exit(1)"
 ')
 docker cp "$SOURCE_ROOT/." "$CONTAINER_ID:/source/smoke-source"
@@ -64,6 +67,7 @@ docker cp "$REPOSITORY_ROOT/scripts/verify-dot-initial-firmware.mjs" "$CONTAINER
 docker cp "$REPOSITORY_ROOT/tests/fixtures/dot-composition-bluetooth.json" "$CONTAINER_ID:/source/dot-composition-bluetooth.json"
 docker cp "$REPOSITORY_ROOT/tests/fixtures/dot-composition-wired.json" "$CONTAINER_ID:/source/dot-composition-wired.json"
 docker cp "$REPOSITORY_ROOT/tests/fixtures/cardputer-adv-composition.json" "$CONTAINER_ID:/source/cardputer-adv-composition.json"
+docker cp "$REPOSITORY_ROOT/tests/fixtures/cardputer-adv-configuration.c" "$CONTAINER_ID:/source/cardputer-adv-configuration.c"
 docker start --attach "$CONTAINER_ID"
 docker container rm "$CONTAINER_ID" >/dev/null
 CONTAINER_ID=""

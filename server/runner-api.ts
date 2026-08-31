@@ -3,7 +3,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { pool, withTransaction } from "./database.js";
 import { digestRunnerSecret, requireRunner, type RunnerRequest } from "./runner-auth.js";
-import { registerGeneratedFirmwarePackage } from "./firmware-package-registration.js";
+import { FirmwarePackageValidationError, registerGeneratedFirmwarePackage } from "./firmware-package-registration.js";
 import { getFirmwareAdapterTarget } from "./firmware-adapter-registry.js";
 
 const router = express.Router();
@@ -137,32 +137,41 @@ router.get("/jobs/:jobId/source", asyncRoute(async (request, response) => {
 router.post("/jobs/:jobId/events", asyncRoute(async (request, response) => {
   const runner = (request as RunnerRequest).runnerIdentity;
   const body = z.object({ leaseId: z.string().uuid(), events: z.array(eventSchema).min(1).max(100) }).parse(request.body);
-  const accepted = await withTransaction(async (client) => {
-    const jobResult = await client.query<{ id: string; status: string }>(
-      `SELECT id, status FROM build_jobs WHERE id=$1 AND runner_id=$2 AND lease_id=$3 FOR UPDATE`,
-      [request.params.jobId, runner.id, body.leaseId],
-    );
-    const job = jobResult.rows[0];
-    if (!job) return false;
-    if (["succeeded", "failed", "cancelled"].includes(job.status)) return true;
-    for (const event of body.events) {
-      await client.query(
-        `INSERT INTO build_events (job_id,event_id,type,message,payload) VALUES ($1,$2,$3,$4,$5::jsonb)
-         ON CONFLICT (event_id) DO NOTHING`,
-        [request.params.jobId, event.eventId, event.type, event.message ?? null, JSON.stringify(event.payload)],
+  let accepted: boolean;
+  try {
+    accepted = await withTransaction(async (client) => {
+      const jobResult = await client.query<{ id: string; status: string }>(
+        `SELECT id, status FROM build_jobs WHERE id=$1 AND runner_id=$2 AND lease_id=$3 FOR UPDATE`,
+        [request.params.jobId, runner.id, body.leaseId],
       );
-      if (event.type === "accepted") await client.query(`UPDATE build_jobs SET status='running', started_at=COALESCE(started_at,now()), updated_at=now() WHERE id=$1`, [request.params.jobId]);
-      if (event.type === "progress") await client.query(`UPDATE build_jobs SET progress=$2, updated_at=now() WHERE id=$1`, [request.params.jobId, Math.max(0, Math.min(100, Number(event.payload.progress ?? 0)))]);
-      if (["completed", "failed", "cancelled"].includes(event.type)) {
-        if (event.type === "completed") await registerGeneratedFirmwarePackage(client, String(request.params.jobId));
-        const status = event.type === "completed" ? "succeeded" : event.type;
-        await client.query(`UPDATE build_jobs SET status=$2, progress=CASE WHEN $2='succeeded' THEN 100 ELSE progress END, finished_at=now(), error=$3, updated_at=now() WHERE id=$1`, [request.params.jobId, status, event.type === "failed" ? event.message ?? "构建失败" : null]);
-        await client.query(`UPDATE build_runners SET current_job_id=NULL, status='online', last_seen_at=now() WHERE id=$1`, [runner.id]);
-        break;
+      const job = jobResult.rows[0];
+      if (!job) return false;
+      if (["succeeded", "failed", "cancelled"].includes(job.status)) return true;
+      for (const event of body.events) {
+        await client.query(
+          `INSERT INTO build_events (job_id,event_id,type,message,payload) VALUES ($1,$2,$3,$4,$5::jsonb)
+           ON CONFLICT (event_id) DO NOTHING`,
+          [request.params.jobId, event.eventId, event.type, event.message ?? null, JSON.stringify(event.payload)],
+        );
+        if (event.type === "accepted") await client.query(`UPDATE build_jobs SET status='running', started_at=COALESCE(started_at,now()), updated_at=now() WHERE id=$1`, [request.params.jobId]);
+        if (event.type === "progress") await client.query(`UPDATE build_jobs SET progress=$2, updated_at=now() WHERE id=$1`, [request.params.jobId, Math.max(0, Math.min(100, Number(event.payload.progress ?? 0)))]);
+        if (["completed", "failed", "cancelled"].includes(event.type)) {
+          if (event.type === "completed") await registerGeneratedFirmwarePackage(client, String(request.params.jobId));
+          const status = event.type === "completed" ? "succeeded" : event.type;
+          await client.query(`UPDATE build_jobs SET status=$2, progress=CASE WHEN $2='succeeded' THEN 100 ELSE progress END, finished_at=now(), error=$3, updated_at=now() WHERE id=$1`, [request.params.jobId, status, event.type === "failed" ? event.message ?? "构建失败" : null]);
+          await client.query(`UPDATE build_runners SET current_job_id=NULL, status='online', last_seen_at=now() WHERE id=$1`, [runner.id]);
+          break;
+        }
       }
+      return true;
+    });
+  } catch (error) {
+    if (error instanceof FirmwarePackageValidationError && body.events.some((event) => event.type === "completed")) {
+      response.status(422).json({ error: error.message });
+      return;
     }
-    return true;
-  });
+    throw error;
+  }
   if (!accepted) { response.status(409).json({ error: "任务租约已失效" }); return; }
   response.status(201).json({ success: true });
 }));

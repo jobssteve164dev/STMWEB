@@ -255,7 +255,7 @@ async function execute(stateDir, state, job) {
       "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "1g", "--pids-limit", "256",
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
       "-v", `${source}:/source:ro`, "-v", `${output}:/output:rw`,
-      BUILD_IMAGE, "sh", "-lc",
+      BUILD_IMAGE, "bash", "-lc",
       buildCommand,
     ];
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });

@@ -18,7 +18,7 @@ cleanup_container() {
 }
 trap cleanup_container EXIT
 
-CONTAINER_ID=$(docker create --platform linux/amd64 --entrypoint sh "$IMAGE" -c '
+CONTAINER_ID=$(docker create --platform linux/amd64 --entrypoint bash "$IMAGE" -c '
   set -eu
   for target in stm32f103cb stm32f103c8; do
     output="/tmp/stmweb-firmware-smoke-$target"

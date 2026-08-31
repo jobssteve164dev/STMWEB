@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
 import { DotFirmwareFlashPanel } from "../src/DotFirmwareFlashPanel.js";
 import { CardputerAdvFirmwareFlashPanel } from "../src/CardputerAdvFirmwareFlashPanel.js";
-import { BuildRunnerPanel } from "../src/BuildRunnerPanel.js";
+import { BuildRunnerPanel, runnerSupportsHardwareProject } from "../src/BuildRunnerPanel.js";
 import { SwdFlashPanel } from "../src/InitialSwdFlashPanel.js";
 import { HardwareGatewayPanel } from "../src/HardwareGatewayPanel.js";
 import type { FirmwareVersionRecord } from "../src/db.js";
@@ -89,6 +89,22 @@ test("renders the phase C firmware composer using user actions", async () => {
   assert.doesNotMatch(html, /固定适配与运行时版本/);
   const source = await readFile("src/BuildRunnerPanel.tsx", "utf8");
   assert.match(source, /首次安装、恢复和无线升级已经包含在这份固件中/);
+});
+
+test("offers only runners that support the selected hardware project", () => {
+  const project = { hardwareProfileId: "stmweb.cardputer-adv", adapterVersion: "1", target: "esp32s3fn8" };
+  const compatible = {
+    status: "online" as const,
+    capabilities: {
+      backend: "docker",
+      firmwareCompositionVersion: 2,
+      supportedAdapterTargets: [project],
+    },
+  };
+  assert.equal(runnerSupportsHardwareProject(compatible, project), true);
+  assert.equal(runnerSupportsHardwareProject({ ...compatible, capabilities: { ...compatible.capabilities, backend: "unavailable" } }, project), false);
+  assert.equal(runnerSupportsHardwareProject({ ...compatible, capabilities: { ...compatible.capabilities, firmwareCompositionVersion: 1 } }, project), false);
+  assert.equal(runnerSupportsHardwareProject({ ...compatible, capabilities: { ...compatible.capabilities, supportedAdapterTargets: [] } }, project), false);
 });
 
 test("does not ask Cardputer ADV users for an unrelated source archive", async () => {

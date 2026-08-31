@@ -70,6 +70,7 @@ export interface BuildRunnerRecord {
     backend?: string;
     environmentVersion?: string;
     firmwareCompositionVersion?: number;
+    supportedAdapterTargets?: Array<{ hardwareProfileId: string; adapterVersion: string; target: string }>;
     toolchains?: Array<{ id: string; version: string; targets: string[] }>;
   };
   currentJobId?: string;

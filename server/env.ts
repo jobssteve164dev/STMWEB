@@ -17,7 +17,7 @@ const environmentSchema = z.object({
   SZLK_PASSPORT_SECRET: optionalString(z.string().min(1)),
   PASSPORT_PRODUCT: z.string().trim().min(1).default("stmweb"),
   SZLKLAWS_BASE_URL: z.string().url().default("https://laws.szlk.ai"),
-  STMWEB_BUILD_IMAGE: z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).default("stmweb/compiler:v0.3.0"),
+  STMWEB_BUILD_IMAGE: z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).default("stmweb/compiler:v0.3.10"),
   STMWEB_BUILD_IMAGE_ID: optionalString(z.string().regex(/^sha256:[a-f0-9]{64}$/)),
   CLOUDMCP_BRIDGE_CLIENT_ID: optionalString(z.string().min(1)),
   CLOUDMCP_BRIDGE_CLIENT_SECRET: optionalString(z.string().min(32)),

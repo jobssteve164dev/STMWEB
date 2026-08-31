@@ -14,6 +14,11 @@ const capabilitiesSchema = z.object({
   environmentVersion: z.string().max(120),
   maxConcurrentBuilds: z.number().int().min(1).max(4).default(1),
   firmwareCompositionVersion: z.literal(2).optional(),
+  supportedAdapterTargets: z.array(z.object({
+    hardwareProfileId: z.string().max(120),
+    adapterVersion: z.string().max(80),
+    target: z.string().max(80),
+  })).max(64).default([]),
   toolchains: z.array(z.object({ id: z.string().max(80), version: z.string().max(80), targets: z.array(z.string().max(80)).max(32) })).max(16),
   diskFreeMb: z.number().int().min(0).optional(),
 });
@@ -89,7 +94,15 @@ router.post("/jobs/lease", asyncRoute(async (request, response) => {
               j.firmware_configuration AS "firmwareConfiguration"
        FROM build_jobs j JOIN hardware_projects p ON p.id=j.hardware_project_id
        WHERE j.runner_id=$1 AND j.status='queued' AND j.desired_state='running'
-         AND EXISTS (SELECT 1 FROM build_runners r WHERE r.id=$1 AND r.capabilities->>'firmwareCompositionVersion'='2')
+         AND EXISTS (
+           SELECT 1 FROM build_runners r
+           WHERE r.id=$1 AND r.capabilities->>'firmwareCompositionVersion'='2' AND r.capabilities->>'backend'='docker'
+             AND EXISTS (
+               SELECT 1 FROM jsonb_array_elements(COALESCE(r.capabilities->'supportedAdapterTargets','[]'::jsonb)) supported
+               WHERE supported->>'hardwareProfileId'=p.hardware_profile_id
+                 AND supported->>'adapterVersion'=j.adapter_version AND supported->>'target'=j.target
+             )
+         )
        ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,
       [runner.id],
     );

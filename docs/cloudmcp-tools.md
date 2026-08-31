@@ -12,14 +12,16 @@
 
 | 用户动作 | 工具 | 结果 |
 | --- | --- | --- |
-| 查看当前可做什么 | `list_stmweb_debug_state` | 设备、在线 Runner、最近构建、最近调试会话 |
+| 查看当前可做什么 | `list_stmweb_debug_state` | 设备、硬件项目、在线 Runner、最近构建、最近调试会话 |
 | 接入一台编译节点 | `create_stmweb_runner_pairing` | 15 分钟一次性配对凭证与固定编译环境身份 |
-| 编译一个固件提交 | `start_stmweb_firmware_build` | 绑定 Runner、受信任仓库、40 位 Git SHA、MCU 目标的构建 ID |
+| 为硬件项目生成固件 | `start_stmweb_firmware_build` | 绑定当前工作区硬件项目与兼容 Runner 的构建 ID |
 | 跟踪编译 | `get_stmweb_firmware_build` | 状态、进度、日志事件、错误、制品名称/大小/SHA-256 |
 | 停止编译 | `cancel_stmweb_firmware_build` | 取消意图及当前状态 |
 | 回看调试证据 | `get_stmweb_debug_session` | 会话身份与有序结构化事件 |
 
-创建类调用只执行一次；后续使用返回的稳定 ID 轮询读取。源码必须来自 `STMWEB_CLOUDMCP_SOURCE_REPOSITORIES` 允许的 GitHub 仓库，并绑定完整 40 位提交 SHA。Provider 最多接收 16 MiB 源码归档，Runner 仍在无网络、1 CPU、1 GiB、只读根文件系统和移除 Linux capabilities 的固定容器内编译。
+创建类调用只执行一次；后续使用返回的稳定 ID 轮询读取。创建固件构建只要求 `runner_id` 与 `hardware_project_id`，不接受 MCU 或架构目标；构建 profile、目标和适配版本全部来自当前工作区的硬件项目。`list_stmweb_debug_state` 返回活动硬件项目的 ID、名称和 `requiresExternalSource`，供调用方完成选择。
+
+当 `requiresExternalSource=false` 时，平台使用该硬件项目固定的标准源码，调用方不得提供 `repository` 或 `source_revision`。当它为 `true` 时，两个字段必须同时提供；仓库必须属于 `STMWEB_CLOUDMCP_SOURCE_REPOSITORIES`，提交必须是完整 40 位 SHA。Provider 最多接收 16 MiB 源码归档。返回值包含 `build_id`、`hardware_project_id`、`status` 和源码 SHA-256；Runner 仍在无网络、1 CPU、1 GiB、只读根文件系统和移除 Linux capabilities 的固定容器内编译。
 
 ## 当前旧发布链与迁移边界
 

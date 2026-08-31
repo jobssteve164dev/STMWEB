@@ -45,6 +45,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
   const { migrateDatabase } = await import("../server/migrate.js");
   const { apiRouter } = await import("../server/api.js");
   const { cloudmcpProviderRouter } = await import("../server/cloudmcp-provider.js");
+  const { runnerApiRouter } = await import("../server/runner-api.js");
   await migrateDatabase();
 
   const suffix = randomBytes(6).toString("hex");
@@ -72,6 +73,7 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
   const app = express();
   app.use("/api/v1", apiRouter);
   app.use("/api/provider-bridge", cloudmcpProviderRouter);
+  app.use("/api/runner", runnerApiRouter);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
@@ -101,6 +103,15 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
       method: "POST", headers, body: JSON.stringify({ name: "DOT 64K 集成测试", ...compactTemplate, selectedModuleIds }),
     })).status, 409);
+    const cardputerTemplate = templatesBody.templates.find((item) => item.hardwareProfileId === "stmweb.cardputer-adv");
+    assert.ok(cardputerTemplate);
+    const cardputerModules = [...cardputerTemplate.capabilityModules, ...cardputerTemplate.connectionModules]
+      .filter((module) => module.defaultEnabled || module.required).map((module) => module.id);
+    const cardputerProjectResponse = await fetch(`${base}/workspaces/${workspaces.rows[0].id}/hardware-projects`, {
+      method: "POST", headers, body: JSON.stringify({ name: "Cardputer 集成测试", ...cardputerTemplate, selectedModuleIds: cardputerModules }),
+    });
+    assert.equal(cardputerProjectResponse.status, 201);
+    const cardputerProjectBody = await cardputerProjectResponse.json() as { hardwareProject: { id: string } };
 
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, { headers })).status, 200);
     assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/devices`, {
@@ -117,6 +128,23 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     assert.equal((await fetch(providerBase, {
       method: "POST", headers, body: JSON.stringify({ tool: "list_stmweb_debug_state", params: {} }),
     })).status, 403);
+    await pool.query(
+      `UPDATE api_connections SET scopes=ARRAY['devices:read','runners:read','builds:read','builds:create','debug:read','artifacts:read'] WHERE id=$1`,
+      [connection.rows[0].id],
+    );
+    const providerStateResponse = await fetch(providerBase, {
+      method: "POST", headers, body: JSON.stringify({ tool: "list_stmweb_debug_state", params: {} }),
+    });
+    assert.equal(providerStateResponse.status, 200);
+    const providerState = await providerStateResponse.json() as { result: { hardware_projects: Array<{ id: string; name: string; requiresExternalSource: boolean }> } };
+    assert.deepEqual(providerState.result.hardware_projects.map((project) => ({ name: project.name, requiresExternalSource: project.requiresExternalSource })).sort((left, right) => left.name.localeCompare(right.name)), [
+      { name: "Cardputer 集成测试", requiresExternalSource: false },
+      { name: "DOT 64K 集成测试", requiresExternalSource: true },
+    ]);
+    assert.deepEqual(new Set(providerState.result.hardware_projects.map((project) => project.id)), new Set([
+      cardputerProjectBody.hardwareProject.id,
+      hardwareProjectBody.hardwareProject.id,
+    ]));
     assert.equal((await fetch(providerBase, {
       method: "POST", headers: { Authorization: "Bearer legacy-provider-secret", "Content-Type": "application/json" },
       body: JSON.stringify({ tool: "list_tools", params: {} }),
@@ -169,11 +197,77 @@ test("Bearer API connection enforces scope, workspace and revocation", { skip: !
     );
     const sourceBytes = Buffer.from("phase-b-source");
     const sourceSha256 = createHash("sha256").update(sourceBytes).digest("hex");
+    const runnerToken = randomBytes(32).toString("base64url");
     const runner = await pool.query<{ id: string }>(
       `INSERT INTO build_runners (workspace_id,name,token_hash,capabilities,status,last_seen_at)
-       VALUES ($1,'集成测试 Runner',$2,'{}'::jsonb,'online',now()) RETURNING id`,
-      [workspaces.rows[0].id, createHash("sha256").update(randomBytes(32)).digest("hex")],
+       VALUES ($1,'集成测试 Runner',$2,'{"backend":"docker","firmwareCompositionVersion":2,"supportedAdapterTargets":[{"hardwareProfileId":"stmweb.cardputer-adv","adapterVersion":"1","target":"esp32s3fn8"},{"hardwareProfileId":"stmweb.dot-v1","adapterVersion":"1","target":"stm32f103c8"}]}'::jsonb,'online',now()) RETURNING id`,
+      [workspaces.rows[0].id, createHash("sha256").update(runnerToken).digest("hex")],
     );
+    const unusedCardputerSource = new FormData();
+    unusedCardputerSource.set("runnerId", runner.rows[0].id);
+    unusedCardputerSource.set("hardwareProjectId", cardputerProjectBody.hardwareProject.id);
+    unusedCardputerSource.set("name", "不应接受未使用源码");
+    unusedCardputerSource.set("source", new Blob([Buffer.from("unused")]), "unused.zip");
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/builds`, {
+      method: "POST", headers: { Authorization: `Bearer ${credential}` }, body: unusedCardputerSource,
+    })).status, 400);
+    const standardCardputerBuild = new FormData();
+    standardCardputerBuild.set("runnerId", runner.rows[0].id);
+    standardCardputerBuild.set("hardwareProjectId", cardputerProjectBody.hardwareProject.id);
+    standardCardputerBuild.set("name", "平台标准源码构建");
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/builds`, {
+      method: "POST", headers: { Authorization: `Bearer ${credential}` }, body: standardCardputerBuild,
+    })).status, 201);
+    const missingDotSource = new FormData();
+    missingDotSource.set("runnerId", runner.rows[0].id);
+    missingDotSource.set("hardwareProjectId", hardwareProjectBody.hardwareProject.id);
+    missingDotSource.set("name", "缺少源码的 DOT 构建");
+    assert.equal((await fetch(`${base}/workspaces/${workspaces.rows[0].id}/builds`, {
+      method: "POST", headers: { Authorization: `Bearer ${credential}` }, body: missingDotSource,
+    })).status, 400);
+    const providerBuildRequest = () => fetch(providerBase, {
+      method: "POST", headers, body: JSON.stringify({
+        tool: "start_stmweb_firmware_build",
+        params: { runner_id: runner.rows[0].id, hardware_project_id: cardputerProjectBody.hardwareProject.id, name: "通用硬件项目构建" },
+      }),
+    });
+    await pool.query(`UPDATE build_runners SET capabilities=capabilities||'{"backend":"unavailable"}'::jsonb WHERE id=$1`, [runner.rows[0].id]);
+    assert.equal((await providerBuildRequest()).status, 409);
+    await pool.query(`UPDATE build_runners SET capabilities=(capabilities||'{"backend":"docker"}'::jsonb)-'firmwareCompositionVersion' WHERE id=$1`, [runner.rows[0].id]);
+    assert.equal((await providerBuildRequest()).status, 409);
+    await pool.query(`UPDATE build_runners SET capabilities=capabilities||'{"firmwareCompositionVersion":2,"supportedAdapterTargets":[]}'::jsonb WHERE id=$1`, [runner.rows[0].id]);
+    assert.equal((await providerBuildRequest()).status, 409);
+    await pool.query(
+      `UPDATE build_runners SET capabilities=capabilities||'{"supportedAdapterTargets":[{"hardwareProfileId":"stmweb.cardputer-adv","adapterVersion":"1","target":"esp32s3fn8"},{"hardwareProfileId":"stmweb.dot-v1","adapterVersion":"1","target":"stm32f103c8"}]}'::jsonb WHERE id=$1`,
+      [runner.rows[0].id],
+    );
+    const providerBuildResponse = await providerBuildRequest();
+    assert.equal(providerBuildResponse.status, 200);
+    const providerBuildBody = await providerBuildResponse.json() as { result: { build_id: string; hardware_project_id: string; status: string } };
+    assert.equal(providerBuildBody.result.hardware_project_id, cardputerProjectBody.hardwareProject.id);
+    assert.equal(providerBuildBody.result.status, "queued");
+    const providerBuild = await pool.query<{ profile: string; hardwareProjectId: string }>(
+      `SELECT profile,hardware_project_id AS "hardwareProjectId" FROM build_jobs WHERE id=$1 AND workspace_id=$2`,
+      [providerBuildBody.result.build_id, workspaces.rows[0].id],
+    );
+    assert.equal(providerBuild.rows[0].hardwareProjectId, cardputerProjectBody.hardwareProject.id);
+    assert.equal(providerBuild.rows[0].profile, "esp32s3-idf-v1");
+    await pool.query(`UPDATE build_runners SET capabilities=capabilities||'{"supportedAdapterTargets":[]}'::jsonb WHERE id=$1`, [runner.rows[0].id]);
+    const runnerHeaders = { Authorization: `Bearer ${runnerToken}`, "Content-Type": "application/json" };
+    const blockedLease = await fetch(`http://127.0.0.1:${address.port}/api/runner/jobs/lease`, { method: "POST", headers: runnerHeaders, body: "{}" });
+    assert.equal(blockedLease.status, 200);
+    assert.equal((await blockedLease.json() as { job: unknown }).job, null);
+    await pool.query(
+      `UPDATE build_runners SET capabilities=capabilities||'{"supportedAdapterTargets":[{"hardwareProfileId":"stmweb.cardputer-adv","adapterVersion":"1","target":"esp32s3fn8"},{"hardwareProfileId":"stmweb.dot-v1","adapterVersion":"1","target":"stm32f103c8"}]}'::jsonb WHERE id=$1`,
+      [runner.rows[0].id],
+    );
+    const acceptedLease = await fetch(`http://127.0.0.1:${address.port}/api/runner/jobs/lease`, { method: "POST", headers: runnerHeaders, body: "{}" });
+    assert.equal(acceptedLease.status, 200);
+    const acceptedLeaseBody = await acceptedLease.json() as { job: { hardwareProfileId: string; adapterVersion: string; target: string } | null };
+    assert.ok(acceptedLeaseBody.job);
+    assert.equal(acceptedLeaseBody.job.hardwareProfileId, "stmweb.cardputer-adv");
+    assert.equal(acceptedLeaseBody.job.adapterVersion, "1");
+    assert.equal(acceptedLeaseBody.job.target, "esp32s3fn8");
     const job = await pool.query<{ id: string }>(
       `INSERT INTO build_jobs
          (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,firmware_configuration,source_name,source_sha256,source_content,status,progress)

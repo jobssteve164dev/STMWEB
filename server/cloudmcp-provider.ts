@@ -4,6 +4,8 @@ import { z } from "zod";
 import { pool } from "./database.js";
 import { env } from "./env.js";
 import { resolveApiConnectionCredential, type ApiScope } from "./api-connection-auth.js";
+import { getFirmwareAdapterTarget, resolveFirmwareConfiguration } from "./firmware-adapter-registry.js";
+import { standardFirmwareSource } from "./firmware-standard-source.js";
 import { digestRunnerSecret } from "./runner-auth.js";
 
 const router = express.Router();
@@ -13,7 +15,7 @@ const revision = z.string().regex(/^[a-f0-9]{40}$/i);
 export const STMWEB_CLOUDMCP_TOOLS = [
   {
     name: "list_stmweb_debug_state",
-    description: "查看 STMWEB 当前设备台账、在线编译算力、最近固件构建和调试会话。",
+    description: "查看 STMWEB 当前设备台账、硬件项目、在线编译算力、最近固件构建和调试会话。",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -23,17 +25,17 @@ export const STMWEB_CLOUDMCP_TOOLS = [
   },
   {
     name: "start_stmweb_firmware_build",
-    description: "从受信任 GitHub 仓库的不可变提交创建一次 STM32 固件构建。",
+    description: "使用当前工作区的硬件项目和在线编译算力创建固件构建；仅在该项目需要用户源码时提供受信任 GitHub 仓库的不可变提交。",
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
         runner_id: { type: "string", format: "uuid" },
+        hardware_project_id: { type: "string", format: "uuid" },
         repository: { type: "string", description: "owner/repository" },
         source_revision: { type: "string", description: "完整 40 位 Git commit SHA" },
         name: { type: "string", minLength: 1, maxLength: 160 },
-        target: { type: "string", enum: ["stm32f103c8", "stm32f103cb"] },
       },
-      required: ["runner_id", "repository", "source_revision", "target"],
+      required: ["runner_id", "hardware_project_id"],
     },
   },
   {
@@ -121,13 +123,28 @@ async function fetchSourceArchive(repo: string, sourceRevision: string): Promise
 }
 
 async function listState(identity: Operator) {
-  const [devices, runners, builds, sessions] = await Promise.all([
+  const [devices, hardwareProjects, runners, builds, sessions] = await Promise.all([
     pool.query(`SELECT id,name,model,board,firmware_version AS "firmwareVersion",updated_at AS "updatedAt" FROM devices WHERE workspace_id=$1 ORDER BY updated_at DESC`, [identity.workspaceId]),
+    pool.query<{ id: string; name: string; hardwareProfileId: string; adapterVersion: string; target: string }>(
+      `SELECT id,name,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",target
+       FROM hardware_projects WHERE workspace_id=$1 AND status='active' ORDER BY updated_at DESC`,
+      [identity.workspaceId],
+    ),
     pool.query(`SELECT id,name,capabilities,CASE WHEN last_seen_at < now()-interval '45 seconds' THEN 'offline' ELSE status END AS status,current_job_id AS "currentJobId",last_seen_at AS "lastSeenAt" FROM build_runners WHERE workspace_id=$1 AND revoked=false ORDER BY created_at DESC`, [identity.workspaceId]),
     pool.query(`SELECT j.id,j.name,j.target,j.status,j.progress,j.error,j.source_name AS "sourceName",j.source_sha256 AS "sourceSha256",j.created_at AS "createdAt",j.finished_at AS "finishedAt",r.name AS "runnerName" FROM build_jobs j JOIN build_runners r ON r.id=j.runner_id WHERE j.workspace_id=$1 ORDER BY j.created_at DESC LIMIT 20`, [identity.workspaceId]),
     pool.query(`SELECT id,device_id AS "deviceId",device_name AS "deviceName",connection_label AS "connectionLabel",status,event_count AS "eventCount",is_demo AS "isDemo",started_at AS "startedAt",ended_at AS "endedAt" FROM debug_sessions WHERE workspace_id=$1 ORDER BY started_at DESC LIMIT 20`, [identity.workspaceId]),
   ]);
-  return { devices: devices.rows, build_runners: runners.rows, firmware_builds: builds.rows, debug_sessions: sessions.rows };
+  return {
+    devices: devices.rows,
+    hardware_projects: hardwareProjects.rows.map((project) => ({
+      id: project.id,
+      name: project.name,
+      requiresExternalSource: !standardFirmwareSource(project.hardwareProfileId, project.adapterVersion, project.target),
+    })),
+    build_runners: runners.rows,
+    firmware_builds: builds.rows,
+    debug_sessions: sessions.rows,
+  };
 }
 
 async function createPairing(identity: Operator) {
@@ -139,18 +156,61 @@ async function createPairing(identity: Operator) {
 }
 
 async function startBuild(identity: Operator, params: unknown) {
-  const input = z.object({ runner_id: uuid, repository, source_revision: revision, name: z.string().trim().min(1).max(160).optional(), target: z.enum(["stm32f103c8", "stm32f103cb"]) }).parse(params);
-  const runner = await pool.query(`SELECT id FROM build_runners WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'`, [input.runner_id, identity.workspaceId]);
-  if (!runner.rowCount) throw Object.assign(new Error("指定编译算力不在线或不属于当前工作区"), { status: 409 });
-  const source = await fetchSourceArchive(input.repository, input.source_revision.toLowerCase());
-  const sourceSha256 = createHash("sha256").update(source).digest("hex");
-  const sourceName = `${input.repository.replace("/", "-")}-${input.source_revision.slice(0, 12)}.zip`;
-  const result = await pool.query<{ id: string }>(
-    `INSERT INTO build_jobs (workspace_id,runner_id,created_by,name,profile,target,source_name,source_sha256,source_content)
-     VALUES ($1,$2,$3,$4,'stm32-cmake-gcc-v1',$5,$6,$7,$8) RETURNING id`,
-    [identity.workspaceId, input.runner_id, identity.userId, input.name || `固件 ${input.source_revision.slice(0, 12)}`, input.target, sourceName, sourceSha256, source],
+  const input = z.object({
+    runner_id: uuid,
+    hardware_project_id: uuid,
+    repository: repository.optional(),
+    source_revision: revision.optional(),
+    name: z.string().trim().min(1).max(160).optional(),
+  }).refine((value) => Boolean(value.repository) === Boolean(value.source_revision), { message: "源码仓库和提交必须同时提供" }).parse(params);
+  const hardwareProject = (await pool.query<{
+    id: string; name: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string; firmwareConfiguration: unknown;
+  }>(
+    `SELECT id,name,hardware_profile_id AS "hardwareProfileId",adapter_version AS "adapterVersion",
+       runtime_version AS "runtimeVersion",target,firmware_configuration AS "firmwareConfiguration"
+     FROM hardware_projects WHERE id=$1 AND workspace_id=$2 AND status='active'`,
+    [input.hardware_project_id, identity.workspaceId],
+  )).rows[0];
+  if (!hardwareProject) throw Object.assign(new Error("硬件项目不存在或不属于当前工作区"), { status: 404 });
+  const registered = getFirmwareAdapterTarget(hardwareProject.hardwareProfileId, hardwareProject.adapterVersion, hardwareProject.target);
+  if (!registered || registered.adapter.runtimeVersion !== hardwareProject.runtimeVersion) {
+    throw Object.assign(new Error("硬件项目使用的适配版本当前不可生成"), { status: 409 });
+  }
+  const runner = await pool.query(
+    `SELECT id FROM build_runners
+     WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'
+       AND capabilities->>'firmwareCompositionVersion'='2' AND capabilities->>'backend'='docker'
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(capabilities->'supportedAdapterTargets','[]'::jsonb)) supported
+         WHERE supported->>'hardwareProfileId'=$3 AND supported->>'adapterVersion'=$4 AND supported->>'target'=$5
+       )`,
+    [input.runner_id, identity.workspaceId, hardwareProject.hardwareProfileId, hardwareProject.adapterVersion, hardwareProject.target],
   );
-  return { build_id: result.rows[0].id, status: "queued", repository: input.repository, source_revision: input.source_revision.toLowerCase(), source_sha256: sourceSha256, target: input.target };
+  if (!runner.rowCount) throw Object.assign(new Error("指定编译算力不在线、不属于当前工作区或不支持该硬件项目"), { status: 409 });
+  const savedConfiguration = hardwareProject.firmwareConfiguration as { capabilityModules?: unknown; connectionModules?: unknown } | null;
+  const selectedModuleIds = savedConfiguration && Array.isArray(savedConfiguration.capabilityModules) && Array.isArray(savedConfiguration.connectionModules)
+    ? [...savedConfiguration.capabilityModules, ...savedConfiguration.connectionModules].filter((item): item is string => typeof item === "string")
+    : undefined;
+  let firmwareConfiguration;
+  try { firmwareConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, selectedModuleIds); }
+  catch (error) { throw Object.assign(new Error(error instanceof Error ? error.message : "硬件项目的固件配置已不可用"), { status: 409 }); }
+  const standardSource = standardFirmwareSource(hardwareProject.hardwareProfileId, hardwareProject.adapterVersion, hardwareProject.target);
+  if (standardSource && input.repository) throw Object.assign(new Error("该硬件项目使用平台标准固件，不需要提供源码提交"), { status: 400 });
+  if (!standardSource && (!input.repository || !input.source_revision)) {
+    throw Object.assign(new Error("该硬件项目需要提供源码仓库和不可变提交"), { status: 400 });
+  }
+  const source = standardSource?.content ?? await fetchSourceArchive(input.repository!, input.source_revision!.toLowerCase());
+  const sourceSha256 = createHash("sha256").update(source).digest("hex");
+  const sourceName = standardSource?.name ?? `${input.repository!.replace("/", "-")}-${input.source_revision!.slice(0, 12)}.zip`;
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO build_jobs
+       (workspace_id,runner_id,hardware_project_id,created_by,name,profile,target,adapter_version,runtime_version,firmware_configuration,source_name,source_sha256,source_content)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13) RETURNING id`,
+    [identity.workspaceId, input.runner_id, hardwareProject.id, identity.userId, input.name || `${hardwareProject.name} 固件`,
+      registered.adapter.buildProfile, hardwareProject.target, hardwareProject.adapterVersion, hardwareProject.runtimeVersion,
+      JSON.stringify(firmwareConfiguration), sourceName, sourceSha256, source],
+  );
+  return { build_id: result.rows[0].id, status: "queued", hardware_project_id: hardwareProject.id, source_sha256: sourceSha256 };
 }
 
 async function getBuild(identity: Operator, params: unknown) {

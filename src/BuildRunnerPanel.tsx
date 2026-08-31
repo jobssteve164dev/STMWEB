@@ -23,6 +23,17 @@ const statusText: Record<BuildJobRecord["status"], string> = {
   queued: "等待编译", leased: "正在准备", running: "正在编译", succeeded: "编译完成", failed: "编译失败", cancelled: "已取消",
 };
 
+export function runnerSupportsHardwareProject(
+  runner: Pick<BuildRunnerRecord, "status" | "capabilities">,
+  project: Pick<HardwareProjectRecord, "hardwareProfileId" | "adapterVersion" | "target">,
+): boolean {
+  return runner.status === "online"
+    && runner.capabilities.backend === "docker"
+    && runner.capabilities.firmwareCompositionVersion === 2
+    && Boolean(runner.capabilities.supportedAdapterTargets?.some((supported) => supported.hardwareProfileId === project.hardwareProfileId
+      && supported.adapterVersion === project.adapterVersion && supported.target === project.target));
+}
+
 function formatArtifactSize(bytes: number, locale: string): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} KiB`;
@@ -172,8 +183,9 @@ export function BuildRunnerPanel({ proAccess }: { proAccess: boolean }) {
     finally { setBusy(false); }
   }
 
-  const available = runners.filter((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion === 2);
-  const needsUpdate = runners.some((runner) => runner.status === "online" && runner.capabilities.firmwareCompositionVersion !== 2);
+  const selectedBuildProject = hardwareProjects.find((project) => project.id === buildProjectId) ?? hardwareProjects[0];
+  const available = selectedBuildProject ? runners.filter((runner) => runnerSupportsHardwareProject(runner, selectedBuildProject)) : [];
+  const needsUpdate = runners.some((runner) => runner.status === "online") && !available.length;
   return (
     <article className="workbench-card build-runner-widget">
       <div className="widget-heading"><div><CloudCog size={18} /><strong>{c("标准固件生成", "Standard Firmware Generation")}</strong></div><button type="button" aria-label={c("刷新生成状态", "Refresh generation status")} onClick={() => void refresh()}><RefreshCw size={16} /></button></div>

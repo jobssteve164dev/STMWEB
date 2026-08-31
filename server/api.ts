@@ -10,6 +10,7 @@ import { requireConnectionScope, requireConnectionWorkspace, requireUserOrApiCon
 import { hasStmwebProAccess } from "./passport.js";
 import { prepareFirmwareUpload } from "./firmware-artifact.js";
 import { getFirmwareAdapterTarget, listFirmwareAdapterTargets, resolveFirmwareConfiguration } from "./firmware-adapter-registry.js";
+import { standardFirmwareSource } from "./firmware-standard-source.js";
 
 interface AuthenticatedRequest extends Request {
   currentUser: { id: string; username: string; name: string; email: string; passportUserId: string };
@@ -21,7 +22,6 @@ const upload = multer({
   limits: { fileSize: 32 * 1024 * 1024, files: 1 },
 });
 const sourceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024, files: 1 } });
-const cardputerStandardSource = Buffer.from("UEsDBAoAAAAAAMQDH10AAAAAAAAAAAAAAAAGABwAUkVBRE1FVVQJAAMPy5RqD8uUanV4CwABBOkDAAAE6QMAAFBLAQIeAwoAAAAAAMQDH10AAAAAAAAAAAAAAAAGABgAAAAAAAAAAACkgQAAAABSRUFETUVVVAUAAw/LlGp1eAsAAQTpAwAABOkDAABQSwUGAAAAAAEAAQBMAAAAQAAAAAAA", "base64");
 
 const uuid = z.string().uuid();
 const sessionSchema = z.object({
@@ -573,13 +573,6 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
     hardwareProjectId: uuid.optional(),
     target: z.enum(["stm32f103c8", "stm32f103cb"]).optional(),
   }).refine((value) => value.hardwareProjectId || value.target, { message: "请选择硬件项目" }).parse(request.body);
-  const runner = await pool.query(
-    `SELECT id FROM build_runners
-     WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'
-       AND capabilities->>'firmwareCompositionVersion'='2'`,
-    [input.runnerId,workspaceId],
-  );
-  if (!runner.rowCount) { response.status(409).json({ error: "请选择已更新且在线的编译算力" }); return; }
   let hardwareProject = input.hardwareProjectId ? (await pool.query<{
     id: string; hardwareProfileId: string; adapterVersion: string; runtimeVersion: string; target: string; firmwareConfiguration: unknown;
   }>(
@@ -607,7 +600,20 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   if (!registered || registered.adapter.runtimeVersion !== hardwareProject.runtimeVersion || (input.profile && registered.adapter.buildProfile !== input.profile)) {
     response.status(409).json({ error: "硬件项目使用的适配版本当前不可生成" }); return;
   }
-  if (!request.file && registered.adapter.adapterId !== "stmweb.cardputer-adv") { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
+  const runner = await pool.query(
+    `SELECT id FROM build_runners
+     WHERE id=$1 AND workspace_id=$2 AND revoked=false AND last_seen_at>=now()-interval '45 seconds'
+       AND capabilities->>'firmwareCompositionVersion'='2' AND capabilities->>'backend'='docker'
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(capabilities->'supportedAdapterTargets','[]'::jsonb)) supported
+         WHERE supported->>'hardwareProfileId'=$3 AND supported->>'adapterVersion'=$4 AND supported->>'target'=$5
+       )`,
+    [input.runnerId,workspaceId,hardwareProject.hardwareProfileId,hardwareProject.adapterVersion,hardwareProject.target],
+  );
+  if (!runner.rowCount) { response.status(409).json({ error: "请选择支持该硬件项目且在线的编译算力" }); return; }
+  const standardSource = standardFirmwareSource(registered.adapter.adapterId, registered.adapter.adapterVersion, registered.target.id);
+  if (standardSource && request.file) { response.status(400).json({ error: "该硬件项目使用平台标准固件，不需要上传源码" }); return; }
+  if (!request.file && !standardSource) { response.status(400).json({ error: "请选择 ZIP 源码包" }); return; }
   const savedConfiguration = hardwareProject.firmwareConfiguration as { capabilityModules?: unknown; connectionModules?: unknown } | null;
   const selectedModuleIds = savedConfiguration && Array.isArray(savedConfiguration.capabilityModules) && Array.isArray(savedConfiguration.connectionModules)
     ? [...savedConfiguration.capabilityModules, ...savedConfiguration.connectionModules].filter((item): item is string => typeof item === "string")
@@ -615,8 +621,8 @@ router.post("/workspaces/:workspaceId/builds", sourceUpload.single("source"), as
   let firmwareConfiguration;
   try { firmwareConfiguration = resolveFirmwareConfiguration(registered.adapter, registered.target, selectedModuleIds); }
   catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : "硬件项目的固件配置已不可用" }); return; }
-  const sourceContent = request.file?.buffer ?? cardputerStandardSource;
-  const sourceName = request.file?.originalname ?? "cardputer-adv-standard-firmware.zip";
+  const sourceContent = request.file?.buffer ?? standardSource!.content;
+  const sourceName = request.file?.originalname ?? standardSource!.name;
   const sha256 = createHash("sha256").update(sourceContent).digest("hex");
   const result = await pool.query<{ id: string }>(
     `INSERT INTO build_jobs

@@ -13,6 +13,13 @@ process.env.CLOUDMCP_BRIDGE_CLIENT_SECRET = "";
 process.env.CLOUDMCP_BRIDGE_CLIENT_SECRET_NEXT = "";
 
 const { STMWEB_CLOUDMCP_TOOLS } = await import("../server/cloudmcp-provider.js");
+const { standardFirmwareSource } = await import("../server/firmware-standard-source.js");
+
+test("selects platform standard source by the exact adapter identity", () => {
+  assert.ok(standardFirmwareSource("stmweb.cardputer-adv", "1", "esp32s3fn8"));
+  assert.equal(standardFirmwareSource("stmweb.cardputer-adv", "2", "esp32s3fn8"), null);
+  assert.equal(standardFirmwareSource("stmweb.cardputer-adv", "1", "another-target"), null);
+});
 
 test("CloudMCP provider exposes only implemented STMWEB operations", () => {
   assert.deepEqual(STMWEB_CLOUDMCP_TOOLS.map((tool) => tool.name), [
@@ -25,7 +32,10 @@ test("CloudMCP provider exposes only implemented STMWEB operations", () => {
   ]);
   assert.equal(STMWEB_CLOUDMCP_TOOLS.some((tool) => tool.name.includes("flash")), false);
   const build = STMWEB_CLOUDMCP_TOOLS.find((tool) => tool.name === "start_stmweb_firmware_build");
-  assert.deepEqual("required" in build!.inputSchema ? build!.inputSchema.required : [], ["runner_id", "repository", "source_revision", "target"]);
+  assert.deepEqual("required" in build!.inputSchema ? build!.inputSchema.required : [], ["runner_id", "hardware_project_id"]);
+  assert.equal("target" in build!.inputSchema.properties, false);
+  assert.equal("hardware_project_id" in build!.inputSchema.properties, true);
+  assert.doesNotMatch(build!.description, /STM32|ESP32/i);
 });
 
 test("CloudMCP provider deployment uses the public environment contract", () => {
@@ -37,4 +47,8 @@ test("CloudMCP provider deployment uses the public environment contract", () => 
   assert.match(provider, /resolveApiConnectionCredential/);
   assert.match(provider, /user_api_bearer_v1/);
   assert.doesNotMatch(provider, /STMWEB_ADMIN_USERNAME|CLOUDMCP_BRIDGE_CLIENT_SECRET/);
+  assert.match(provider, /capabilities->>'backend'='docker'/);
+  assert.match(provider, /supportedAdapterTargets/);
+  assert.match(provider, /hardware_projects:/);
+  assert.match(provider, /requiresExternalSource/);
 });

@@ -9,7 +9,6 @@ ARG IDF_VERSION=v5.4.2
 
 ENV IDF_PATH=/opt/esp/idf \
     IDF_TOOLS_PATH=/opt/esp \
-    IDF_PYTHON_CHECK_CONSTRAINTS=no \
     IDF_CCACHE_ENABLE=1
 
 RUN apt-get update \
@@ -49,6 +48,8 @@ RUN git clone --recursive --depth=1 --shallow-submodules \
  && "$IDF_PATH/tools/idf_tools.py" --non-interactive install cmake \
  && "$IDF_PATH/tools/idf_tools.py" --non-interactive install-python-env \
  && rm -rf "$IDF_TOOLS_PATH/dist"
+
+ENV IDF_PYTHON_CHECK_CONSTRAINTS=no
 
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=node_runtime /usr/local /usr/local

@@ -107,6 +107,7 @@ assert.match(dockerfile, /COPY --from=node_runtime \/usr\/local \/usr\/local/);
 assert.match(dockerfile, /IDF_PATH=\/opt\/esp\/idf/);
 assert.match(dockerfile, /IDF_TOOLS_PATH=\/opt\/esp/);
 assert.match(dockerfile, /IDF_PYTHON_CHECK_CONSTRAINTS=no/);
+assert.match(dockerfile, /install-python-env[\s\S]*ENV IDF_PYTHON_CHECK_CONSTRAINTS=no/);
 assert.match(dockerfile, /cmake/);
 assert.match(dockerfile, /ninja-build/);
 assert.match(dockerfile, /unzip/);

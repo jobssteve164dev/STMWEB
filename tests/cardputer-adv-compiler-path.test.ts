@@ -14,6 +14,7 @@ test("routes Cardputer ADV builds through the pinned ESP-IDF compiler environmen
   assert.match(runner, /hardwareProfileId === "stmweb\.cardputer-adv"/);
   assert.match(image, /ARG IDF_VERSION=v5\.4\.2/);
   assert.match(image, /idf_tools\.py" --non-interactive install required --targets=esp32s3/);
+  assert.match(image, /install-python-env[\s\S]*ENV IDF_PYTHON_CHECK_CONSTRAINTS=no/);
   assert.match(smoke, /cardputer-adv/);
   assert.match(smoke, /cardputer_adv_ota\.bin/);
   assert.match(smoke, /stmweb_firmware_manifest\.json/);

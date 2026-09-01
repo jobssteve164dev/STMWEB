@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS firmware_versions (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (workspace_id, sha256),
   CHECK (artifact_role IN ('complete-image','application','unclassified')),
-  CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]),
+  CHECK (flash_methods <@ ARRAY['swd','usb','bluetooth']::text[]),
   CHECK (status IN ('draft','verified','stable','retired'))
 );
 
@@ -173,7 +173,7 @@ ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFA
 ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_artifact_role_check;
 ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_artifact_role_check CHECK (artifact_role IN ('complete-image','application','unclassified'));
 ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_flash_methods_check;
-ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_flash_methods_check CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]);
+ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_flash_methods_check CHECK (flash_methods <@ ARRAY['swd','usb','bluetooth']::text[]);
 ALTER TABLE firmware_versions DROP CONSTRAINT IF EXISTS firmware_versions_status_check;
 ALTER TABLE firmware_versions ADD CONSTRAINT firmware_versions_status_check CHECK (status IN ('draft','verified','stable','retired'));
 
@@ -447,13 +447,16 @@ CREATE TABLE IF NOT EXISTS firmware_package_artifacts (
   sha256 text NOT NULL CHECK (length(sha256) = 64),
   content bytea NOT NULL,
   artifact_role text NOT NULL CHECK (artifact_role IN ('complete-image','application')),
-  flash_methods text[] NOT NULL CHECK (flash_methods <@ ARRAY['swd','bluetooth']::text[]),
+  flash_methods text[] NOT NULL CHECK (flash_methods <@ ARRAY['swd','usb','bluetooth']::text[]),
   flash_size integer NOT NULL,
   application_base integer NOT NULL,
   application_limit integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (package_id, artifact_role)
 );
+
+ALTER TABLE firmware_package_artifacts DROP CONSTRAINT IF EXISTS firmware_package_artifacts_flash_methods_check;
+ALTER TABLE firmware_package_artifacts ADD CONSTRAINT firmware_package_artifacts_flash_methods_check CHECK (flash_methods <@ ARRAY['swd','usb','bluetooth']::text[]);
 
 CREATE INDEX IF NOT EXISTS firmware_package_artifacts_package_idx ON firmware_package_artifacts(package_id, created_at);
 `;

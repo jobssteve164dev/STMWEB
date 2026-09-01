@@ -7,6 +7,7 @@ import { DotFirmwareFlashPanel } from "../src/DotFirmwareFlashPanel.js";
 import { CardputerAdvFirmwareFlashPanel } from "../src/CardputerAdvFirmwareFlashPanel.js";
 import { BuildRunnerPanel, runnerSupportsHardwareProject } from "../src/BuildRunnerPanel.js";
 import { SwdFlashPanel } from "../src/InitialSwdFlashPanel.js";
+import { UsbFirmwareFlashPanel } from "../src/UsbFirmwareFlashPanel.js";
 import { HardwareGatewayPanel } from "../src/HardwareGatewayPanel.js";
 import type { FirmwareVersionRecord } from "../src/db.js";
 
@@ -36,10 +37,9 @@ const completeImage = firmware({ id: "complete", fileName: "dot-complete.hex", f
 const application = firmware({ id: "application", fileName: "dot-application.bin" });
 const draft = firmware({ id: "draft", fileName: "unverified.bin", hardwareProfileId: null, artifactRole: "unclassified", flashMethods: [], status: "draft" });
 
-test("renders SWD as a long-term path and lists only compatible complete images", () => {
+test("renders SWD as a firmware-driven path and lists only compatible complete images", () => {
   const html = renderToStaticMarkup(React.createElement(SwdFlashPanel, { firmwareVersions: [completeImage, application, draft] }));
-  assert.match(html, /长期有线烧录/);
-  assert.match(html, /通过 SWD 安装、更新或恢复/);
+  assert.match(html, /SWD 烧录/);
   assert.match(html, /DOT 完整稳定版（含 Bootloader，自动匹配）/);
   assert.match(html, /dot-complete\.hex/);
   assert.doesNotMatch(html, /dot-application\.bin/);
@@ -78,6 +78,53 @@ test("offers only verified Cardputer ADV applications in wireless flashing", () 
   assert.match(html, /cardputer-adv-ota\.bin/);
   assert.doesNotMatch(html, /dot-application\.bin/);
   assert.doesNotMatch(html, /unverified\.bin/);
+});
+
+test("offers SWD, USB and Bluetooth from firmware compatibility without requiring a connected device", async () => {
+  const flashPanels = await import("../src/FirmwareFlashPanels.js").catch(() => null);
+  assert.ok(flashPanels, "the unified firmware flashing entry is missing");
+  const cardputerComplete = firmware({
+    id: "cardputer-complete",
+    fileName: "cardputer-adv-complete.bin",
+    hardwareProfileId: "stmweb.cardputer-adv",
+    artifactRole: "complete-image",
+    flashMethods: ["usb"],
+    flashSize: 8 * 1024 * 1024,
+    applicationBase: 0x40000,
+    applicationLimit: 0x3e0000,
+  });
+  const cardputerApplication = firmware({
+    id: "cardputer-application",
+    fileName: "cardputer-adv-ota.bin",
+    hardwareProfileId: "stmweb.cardputer-adv",
+    flashMethods: ["usb", "bluetooth"],
+    flashSize: 8 * 1024 * 1024,
+    applicationBase: 0x40000,
+    applicationLimit: 0x3e0000,
+  });
+  const html = renderToStaticMarkup(React.createElement(flashPanels.FirmwareFlashPanels, {
+    connection: null,
+    voltage: 0,
+    firmwareVersions: [completeImage, application, cardputerComplete, cardputerApplication, draft],
+    onEvent: () => undefined,
+  }));
+
+  assert.match(html, /SWD 烧录/);
+  assert.match(html, /USB 烧录/);
+  assert.match(html, /蓝牙烧录/);
+  assert.match(html, /dot-complete\.hex/);
+  assert.match(html, /cardputer-adv-complete\.bin/);
+  assert.match(html, /dot-application\.bin/);
+  assert.match(html, /cardputer-adv-ota\.bin/);
+  assert.doesNotMatch(html, /unverified\.bin/);
+});
+
+test("offers only complete images in USB flashing until OTA slot selection is supported", () => {
+  const complete = firmware({ id: "cardputer-complete", fileName: "cardputer-complete.bin", hardwareProfileId: "stmweb.cardputer-adv", artifactRole: "complete-image", flashMethods: ["usb"] });
+  const application = firmware({ id: "cardputer-app", fileName: "cardputer-app.bin", hardwareProfileId: "stmweb.cardputer-adv", flashMethods: ["usb", "bluetooth"] });
+  const html = renderToStaticMarkup(React.createElement(UsbFirmwareFlashPanel, { firmwareVersions: [complete, application], onEvent: () => undefined }));
+  assert.match(html, /cardputer-complete\.bin/);
+  assert.doesNotMatch(html, /cardputer-app\.bin/);
 });
 
 test("renders the phase C firmware composer using user actions", async () => {

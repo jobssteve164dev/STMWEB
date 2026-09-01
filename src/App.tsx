@@ -77,9 +77,7 @@ import {
 import { dotCapabilityManifest, parseDotTelemetryChunk } from "./dot-telemetry.js";
 import { applyCardputerAdvEvent, cardputerAdvInitialTwin, parseCardputerAdvStream, type CardputerAdvTwinState } from "./cardputer-adv.js";
 import { ApiConnectionsSettings } from "./ApiConnectionsSettings.js";
-import { DotFirmwareFlashPanel } from "./DotFirmwareFlashPanel.js";
-import { CardputerAdvFirmwareFlashPanel } from "./CardputerAdvFirmwareFlashPanel.js";
-import { SwdFlashPanel } from "./InitialSwdFlashPanel.js";
+import { FirmwareFlashPanels } from "./FirmwareFlashPanels.js";
 import { BuildRunnerPanel } from "./BuildRunnerPanel.js";
 import { useLocale } from "./i18n.js";
 import { HardwareGatewayPanel } from "./HardwareGatewayPanel.js";
@@ -271,8 +269,6 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
     version: c("未关联", "Not linked"),
   };
   const activeCapability = capabilities.find((item) => item.id === selectedCapability);
-  const hasCardputerWorkbench = deviceManifest?.device.id === "cardputer-adv";
-
   const combinedFirmware = useMemo(
     () => [
       ...firmwareVersions.map((version) => ({
@@ -881,10 +877,10 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
               <section className="firmware-actions" aria-labelledby="firmware-actions-heading">
                 <div className="firmware-actions-heading">
                   <div><span className="panel-kicker">{c("常用工具", "Common tools")}</span><h2 id="firmware-actions-heading">{c("固件安装与升级", "Firmware installation & updates")}</h2></div>
-                  <p>{hasCardputerWorkbench ? c("首次通过 USB 安装，之后可直接用蓝牙升级应用。", "Install once over USB, then update applications directly over Bluetooth.") : c("SWD 可长期用于安装、更新和恢复；硬件支持无线时，也可以直接升级应用。", "Use SWD for installation, updates and recovery at any time. Compatible hardware can also update applications wirelessly.")}</p>
+                  <p>{c("选择固件支持的 SWD、USB 或蓝牙方式完成安装、更新和恢复。", "Install, update or recover using the SWD, USB or Bluetooth methods supported by each firmware.")}</p>
                 </div>
                 <div className="firmware-actions-grid">
-                  {hasCardputerWorkbench ? <CardputerAdvFirmwareFlashPanel connection={connectionRef.current} firmwareVersions={firmwareVersions} onEvent={appendEvent} /> : <><SwdFlashPanel firmwareVersions={firmwareVersions} /><DotFirmwareFlashPanel connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} /></>}
+                  <FirmwareFlashPanels connection={connectionRef.current} voltage={telemetrySnapshot.voltage} firmwareVersions={firmwareVersions} onEvent={appendEvent} />
                 </div>
               </section>
               <BuildRunnerPanel proAccess={planAccess.pro} />
@@ -898,13 +894,13 @@ function App({ workspace, user, planAccess, onSignOut }: AppProps) {
                   {combinedFirmware.map((version) => (
                     <article className="artifact-card" key={version.id}>
                       <span className="artifact-icon"><FileCode2 size={21} /></span>
-                      <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : version.hardwareProfileId === "stmweb.cardputer-adv" ? ` · Cardputer ADV · ${version.artifactRole === "complete-image" ? c("USB 首次安装", "Initial USB install") : c("蓝牙应用升级", "Bluetooth application update")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
+                      <div className="artifact-main"><div><strong>{version.packageName || version.fileName}</strong>{version.isExample ? <span className="example-chip">{c("示例", "Example")}</span> : <span className="saved-chip">{version.status === "verified" || version.status === "stable" ? c("可烧录", "Ready") : c("待适配", "Needs setup")}</span>}</div><p>{version.packageName ? `${version.hardwareProjectName} · ` : ""}{version.fileType} · {formatBytes(version.fileSize)}{version.hardwareProfileId === "stmweb.dot-v1" ? ` · DOT V1 · ${version.artifactRole === "complete-image" ? c("完整固件（含 Bootloader）", "Complete image (includes Bootloader)") : c("应用固件（保留 Bootloader）", "Application (keeps Bootloader)")}` : version.hardwareProfileId === "stmweb.cardputer-adv" ? ` · Cardputer ADV · ${version.artifactRole === "complete-image" ? c("USB 安装与恢复", "USB install and recovery") : c("蓝牙应用更新", "Bluetooth application update")}` : ""}</p><code>SHA-256 {version.sha256.slice(0, 16)}…</code></div>
                       <time>{sessionDateFormatter.format(new Date(version.createdAt))}</time>
                     </article>
                   ))}
                 </div>
               </section>
-              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("SWD 会核对芯片、容量和写入范围；无线烧录会重新核对硬件、应用分区和完整性。", "SWD checks the chip, capacity and write range. Wireless flashing re-checks the hardware, application partition and integrity.")}</p></div></div>
+              <div className="notice-card"><ShieldCheck size={20} /><div><strong>{c("每次写入前都重新校验", "Every flash is checked again")}</strong><p>{c("SWD、USB 和蓝牙都会按固件声明重新核对目标硬件、写入范围和完整性。", "SWD, USB and Bluetooth re-check the target hardware, write range and integrity declared by the firmware.")}</p></div></div>
             </section>
           ) : null}
 

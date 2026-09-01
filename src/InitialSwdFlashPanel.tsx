@@ -21,8 +21,7 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
   const [savedId, setSavedId] = useState(builtInFirmwareId);
   const [resetStep, setResetStep] = useState<"hold" | "release" | "release-after-failure" | null>(null);
   const resetAction = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null);
-  const savedSwdImages = useMemo(() => firmwareVersions.filter((item) => item.hardwareProfileId === "stmweb.dot-v1"
-    && item.artifactRole === "complete-image" && item.flashMethods.includes("swd")
+  const savedSwdImages = useMemo(() => firmwareVersions.filter((item) => item.artifactRole === "complete-image" && item.flashMethods.includes("swd")
     && (item.status === "verified" || item.status === "stable")), [firmwareVersions]);
 
   useEffect(() => {
@@ -104,14 +103,11 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
   }
 
   return (
-    <article className="initial-flash-card">
-      <div className="initial-flash-icon"><Cpu size={24} /></div>
-      <div className="initial-flash-copy">
-        <span className="panel-kicker">{c("长期有线烧录", "Wired flashing")}</span>
-        <h2>{c("通过 SWD 安装、更新或恢复", "Install, update or recover over SWD")}</h2>
-        <p>{c("用于 DOT V1 的日常有线烧录和设备恢复。系统会先识别芯片与 Flash 容量，只有固件完全匹配后才会擦除并写入。", "Use SWD for routine wired flashing and recovery on DOT V1. The chip and Flash capacity are checked before any matching firmware is erased or written.")}</p>
-        <label className="swd-firmware-source"><span>{c("烧录固件", "Firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => setSavedId(event.target.value)}><option value={builtInFirmwareId}>{c("DOT 完整稳定版（含 Bootloader，自动匹配）", "DOT complete stable firmware (includes Bootloader, automatic match)")}</option>{savedSwdImages.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label>
-        <div className="flash-safety"><ShieldCheck size={16} /><span>{c("SWD 始终可用；支持蓝牙的固件也可以在写入后改用无线更新。", "SWD remains available. Firmware with Bluetooth support can also use wireless updates after flashing.")}</span></div>
+    <article className="workbench-card firmware-flash-widget">
+      <div className="widget-heading"><div><Cpu size={18} /><strong>{c("SWD 烧录", "SWD flashing")}</strong></div><span className="widget-state offline"><i />{c("连接时选择探针", "Choose probe on connection")}</span></div>
+      <p>{c("选择要通过 SWD 烧录的完整固件。系统会先识别芯片与 Flash 容量，完全匹配后才会擦除并写入。", "Choose the complete image to flash over SWD. The chip and flash capacity are checked before a matching image is erased or written.")}</p>
+      <div className="firmware-flash-source"><label><span>{c("烧录固件", "Firmware")}</span><select value={savedId} disabled={busy} onChange={(event) => setSavedId(event.target.value)}><option value={builtInFirmwareId}>{c("DOT 完整稳定版（含 Bootloader，自动匹配）", "DOT complete stable firmware (includes Bootloader, automatic match)")}</option>{savedSwdImages.map((item) => <option value={item.id} key={item.id}>{item.fileName}</option>)}</select></label></div>
+      <div className="flash-safety"><ShieldCheck size={16} /><span>{c("写入前会再次核对目标芯片和容量。", "The target chip and capacity are checked again before writing.")}</span></div>
         {resetStep ? <div className="reset-connect-prompt" role="alertdialog" aria-live="assertive">
           <strong>{resetStep === "hold" ? c("现在按住小车 RESET，不要松开", "Press and keep holding the vehicle RESET button") : c("现在松开小车 RESET", "Release the vehicle RESET button now")}</strong>
           <p>{resetStep === "hold"
@@ -127,7 +123,6 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
         {progress ? <div className="flash-progress" aria-live="polite"><div><span>{progress.detail}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
         {result ? <div className="flash-result success"><Check size={17} /><span>{c(`SWD 烧录完成 · ${result.probeName} · ${result.flashSize / 1024} KiB`, `SWD flashing complete · ${result.probeName} · ${result.flashSize / 1024} KiB`)}</span></div> : null}
         {error ? <div className="flash-result error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : null}
-      </div>
       <div className="initial-flash-actions">
         <button className="primary-button" type="button" disabled={busy} onClick={() => void flash("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并烧录", "Connect DAPLink & Flash")}</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => void flash("slogic-combo8")}>{c("使用 SLogic Combo8", "Use SLogic Combo8")}</button>

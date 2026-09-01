@@ -844,7 +844,7 @@ h1, h2, h3 { text-wrap: balance; }
   align-items: stretch;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .firmware-actions-grid > * {
@@ -872,6 +872,10 @@ h1, h2, h3 { text-wrap: balance; }
 
 .firmware-actions-grid .firmware-flash-widget {
   grid-column: auto;
+}
+
+.firmware-actions-grid .bluetooth-flash-widget {
+  grid-column: 1 / -1;
 }
 
 .metric-card {
@@ -3345,10 +3349,10 @@ td small {
 .firmware-flash-widget > p { color: var(--text-muted); line-height: 1.55; margin: 12px 0; }
 .widget-state.offline { color: var(--text-muted); }
 .firmware-flash-source { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(220px, 1fr) auto auto; }
-.firmware-flash-source > label { display: grid; gap: 7px; }
+.firmware-flash-source > label { display: grid; gap: 7px; min-width: 0; }
 .firmware-flash-source > label > span { color: var(--text-muted); font-size: 12px; }
 .firmware-flash-source > span { color: var(--text-muted); padding-bottom: 12px; }
-.firmware-flash-source select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; padding: 0 10px; }
+.firmware-flash-source select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; min-width: 0; padding: 0 10px; width: 100%; }
 .flash-preflight { display: flex; gap: 8px; margin: 14px 0; }
 .flash-preflight span { align-items: center; border-radius: 999px; display: flex; font-size: 12px; font-weight: 700; gap: 5px; padding: 6px 10px; }
 .flash-preflight .ready { background: rgba(43, 166, 121, 0.14); color: #55d4a4; }

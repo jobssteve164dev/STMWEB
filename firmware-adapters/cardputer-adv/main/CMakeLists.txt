@@ -8,6 +8,10 @@ idf_component_register(
   INCLUDE_DIRS "."
   REQUIRES app_update bt esp_adc esp_driver_gpio esp_driver_i2c esp_driver_spi esp_lcd mbedtls nvs_flash)
 
+if(DEFINED STMWEB_CONFIGURATION_SOURCE AND EXISTS "${STMWEB_CONFIGURATION_SOURCE}")
+  target_link_libraries(${COMPONENT_LIB} INTERFACE "-u stmweb_firmware_configuration")
+endif()
+
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
   STMWEB_ADAPTER_MARKER="STMWEB_ADAPTER:stmweb.cardputer-adv"
   STMWEB_FIRMWARE_VERSION="1.0.0")

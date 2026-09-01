@@ -6,6 +6,7 @@ test("routes Cardputer ADV builds through the pinned ESP-IDF compiler environmen
   const runner = readFileSync("runner/stmweb-runner.mjs", "utf8");
   const image = readFileSync("runner/image/Dockerfile", "utf8");
   const smoke = readFileSync("scripts/test-firmware-compiler-image.sh", "utf8");
+  const finalBuild = readFileSync("scripts/test-cardputer-adv-final-build.mjs", "utf8");
   const ota = readFileSync("firmware-adapters/cardputer-adv/main/cardputer_ble_ota.c", "utf8");
   const sdkconfig = readFileSync("firmware-adapters/cardputer-adv/sdkconfig.defaults", "utf8");
   const packageManifest = readFileSync("firmware-adapters/cardputer-adv/write-package-manifest.mjs", "utf8");
@@ -16,8 +17,11 @@ test("routes Cardputer ADV builds through the pinned ESP-IDF compiler environmen
   assert.match(image, /idf_tools\.py" --non-interactive install required --targets=esp32s3/);
   assert.match(image, /install-python-env[\s\S]*ENV IDF_PYTHON_CHECK_CONSTRAINTS=no/);
   assert.match(smoke, /cardputer-adv/);
-  assert.match(smoke, /cardputer_adv_ota\.bin/);
-  assert.match(smoke, /stmweb_firmware_manifest\.json/);
+  assert.match(smoke, /test-cardputer-adv-final-build\.mjs/);
+  assert.match(smoke, /RUNNER_SOURCE/);
+  assert.match(finalBuild, /cardputer_adv_ota\.bin/);
+  assert.match(finalBuild, /cardputer_adv_complete\.bin/);
+  assert.match(finalBuild, /stmweb_firmware_manifest\.json/);
   assert.match(ota, /command == OTA_COMMIT \? 0 : ota_offset/);
   assert.match(ota, /write_u32_le\(response \+ 3, acknowledged_offset\)/);
   assert.match(ota, /BLE_GATT_CHR_F_WRITE_ENC/);

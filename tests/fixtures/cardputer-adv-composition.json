@@ -9,5 +9,5 @@
   "portBindings": [],
   "resourceBindings": [],
   "buildFeatures": ["cardputer.display-twin", "cardputer.keyboard-map", "cardputer.bluetooth-ota"],
-  "compositionSha256": "smoke"
+  "compositionSha256": "2e8753ac2bbd260374b7e7bc4277c2f581bab89559b814b76b327df6b1ba7025"
 }

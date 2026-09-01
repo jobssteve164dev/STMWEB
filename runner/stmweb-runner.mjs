@@ -241,7 +241,7 @@ function canonicalFirmwareConfiguration(value) {
 function firmwareConfigurationSource(configuration) {
   const marker = Buffer.from(`STMWEB_COMPOSITION:${JSON.stringify(configuration)}\0`, "utf8");
   const values = [...marker].map((value) => `0x${value.toString(16).padStart(2, "0")}`).join(",");
-  return `#include <stdint.h>\n__attribute__((used,section(".stmweb_config"))) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
+  return `#include <stdint.h>\n__attribute__((used)) const uint8_t stmweb_firmware_configuration[] = {${values}};\n`;
 }
 
 async function execute(stateDir, state, job) {

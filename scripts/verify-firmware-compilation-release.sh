@@ -53,5 +53,5 @@ docker load --input "$RUNTIME_ARCHIVE" >/dev/null
 docker run --rm -i --platform linux/amd64 --entrypoint node "$IMAGE" --input-type=module - version < "$RUNNER_SCRIPT" >/dev/null
 docker run --rm --platform linux/amd64 --entrypoint node "$IMAGE" -e 'process.exit(Number(process.versions.node.split(`.`)[0]) >= 22 ? 0 : 1)'
 docker run --rm --platform linux/amd64 --entrypoint arm-none-eabi-gcc "$IMAGE" --version >/dev/null
-bash "$REPOSITORY_ROOT/scripts/test-firmware-compiler-image.sh" "$IMAGE"
+bash "$REPOSITORY_ROOT/scripts/test-firmware-compiler-image.sh" "$IMAGE" "$RUNNER_SCRIPT"
 printf 'verified_firmware_compilation_version=%s\nverified_source_revision=%s\nverified_package_sha256=%s\n' "$VERSION" "$SOURCE_REVISION" "$PACKAGE_SHA"

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (file) => readFile(file, "utf8");
-const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, compilerImageTest, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, cardputerAdapter, packageManifest, bootloader, serverEnv, compose, envExample] = await Promise.all([
+const [workflow, release, installer, packageInstaller, packageBuilder, packageVerifier, compilerImageTest, cardputerFinalBuildTest, classicArchiveExporter, runner, dockerfile, webDockerfile, dockerignore, schema, adapter, cardputerAdapter, packageManifest, bootloader, serverEnv, compose, envExample] = await Promise.all([
   read(".github/workflows/compiler-image.yml"),
   read("scripts/build-compiler-environment-release.sh"),
   read("runner/install-runner.sh"),
@@ -10,6 +10,7 @@ const [workflow, release, installer, packageInstaller, packageBuilder, packageVe
   read("scripts/build-firmware-compilation-release.sh"),
   read("scripts/verify-firmware-compilation-release.sh"),
   read("scripts/test-firmware-compiler-image.sh"),
+  read("scripts/test-cardputer-adv-final-build.mjs"),
   read("scripts/export-classic-docker-archive.sh"),
   read("runner/stmweb-runner.mjs"),
   read("runner/image/Dockerfile"),
@@ -56,11 +57,17 @@ assert.match(packageBuilder, /build_context_bytes/);
 assert.match(packageBuilder, /largest_source_contributors/);
 assert.match(packageVerifier, /package member set is invalid/);
 assert.match(packageVerifier, /test-firmware-compiler-image\.sh/);
+assert.match(packageVerifier, /test-firmware-compiler-image\.sh" "\$IMAGE" "\$RUNNER_SCRIPT"/);
 assert.match(compilerImageTest, /docker cp "\$SOURCE_ROOT\/\."/);
 assert.match(compilerImageTest, /for target in stm32f103cb stm32f103c8/);
 assert.match(compilerImageTest, /cmake --build "\$output" --parallel 1/);
 assert.match(compilerImageTest, /verify-dot-initial-firmware\.mjs/);
-assert.match(compilerImageTest, /cardputer_adv_ota\.bin/);
+assert.match(compilerImageTest, /test-cardputer-adv-final-build\.mjs/);
+assert.match(compilerImageTest, /RUNNER_SOURCE/);
+assert.match(cardputerFinalBuildTest, /firmwareConfigurationSource/);
+assert.match(cardputerFinalBuildTest, /idf\.py -C/);
+assert.match(cardputerFinalBuildTest, /cardputer_adv_complete\.bin/);
+assert.match(cardputerFinalBuildTest, /STMWEB_COMPOSITION/);
 assert.match(compilerImageTest, /--entrypoint bash/);
 assert.doesNotMatch(compilerImageTest, /--entrypoint sh/);
 assert.match(packageInstaller, /--code-file \/run\/stmweb-pairing-code/);

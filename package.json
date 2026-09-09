@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "esptool-js": "0.6.1",
-    "express": "^4.22.2",
+    "express": "^5.2.1",
     "lucide-react": "^1.31.0",
     "multer": "^2.2.0",
     "pg": "^8.23.0",

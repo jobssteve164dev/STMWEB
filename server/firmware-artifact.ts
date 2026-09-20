@@ -158,7 +158,10 @@ function inspectEsp32s3Image(content: Uint8Array, offset: number): { end: number
   return { end: cursor };
 }
 
-function cardputerPartitionMatches(content: Uint8Array, target: FirmwareAdapterTarget): boolean {
+function cardputerPartitionMatches(
+  content: Uint8Array,
+  target: Pick<FirmwareAdapterTarget, "flashSize" | "applicationBase" | "applicationLimit">,
+): boolean {
   const tableOffset = 0x8000;
   const tableLimit = Math.min(content.byteLength, tableOffset + 0x1000);
   let otaData = false;
@@ -178,6 +181,56 @@ function cardputerPartitionMatches(content: Uint8Array, target: FirmwareAdapterT
       && partitionSize === target.applicationLimit - target.applicationBase) ota1 = true;
   }
   return otaData && ota0 && ota1;
+}
+
+function inspectGenericCardputerCompleteImage(
+  content: Uint8Array,
+  candidates = registeredTargets,
+): FirmwareArtifactDescriptor | null {
+  const bootImage = inspectEsp32s3Image(content, 0);
+  if (!bootImage || bootImage.end > 0x8000) return null;
+  for (const { adapter, target } of candidates) {
+    if (adapter.adapterId !== "stmweb.cardputer-adv" || content.byteLength > target.flashSize) continue;
+    const partitions: Array<{ type: number; offset: number; size: number }> = [];
+    let tableComplete = false;
+    for (let offset = 0x8000; offset + 32 <= Math.min(content.byteLength, 0x9000); offset += 32) {
+      if (content[offset] === 0xff && content[offset + 1] === 0xff) { tableComplete = true; break; }
+      if (content[offset] === 0xeb && content[offset + 1] === 0xeb) {
+        const digest = createHash("md5").update(content.subarray(0x8000, offset)).digest();
+        if (!digest.equals(Buffer.from(content.subarray(offset + 16, offset + 32)))) break;
+        tableComplete = true;
+        break;
+      }
+      if (content[offset] !== 0xaa || content[offset + 1] !== 0x50) break;
+      const partitionOffset = readU32(content, offset + 4);
+      const partitionSize = readU32(content, offset + 8);
+      if (!partitionSize || partitionOffset < 0x9000 || partitionOffset + partitionSize > target.flashSize
+        || partitions.some((partition) => partitionOffset < partition.offset + partition.size
+          && partition.offset < partitionOffset + partitionSize)) break;
+      partitions.push({ type: content[offset + 2], offset: partitionOffset, size: partitionSize });
+    }
+    if (!tableComplete || !partitions.length) continue;
+    const application = partitions.find((partition) => {
+      if (partition.type !== 0) return false;
+      const image = inspectEsp32s3Image(content, partition.offset);
+      return image !== null && image.end <= partition.offset + partition.size;
+    });
+    if (!application) continue;
+    const contract = target.artifacts.find((artifact) => artifact.role === "complete-image");
+    if (!contract) continue;
+    return {
+      hardwareProfileId: adapter.adapterId,
+      artifactRole: "complete-image",
+      flashMethods: ["usb"],
+      flashSize: target.flashSize,
+      applicationBase: application.offset,
+      applicationLimit: application.offset + application.size,
+      runtimeVersion: null,
+      status: "verified",
+      fileType: "BIN",
+    };
+  }
+  return null;
 }
 
 function inspectCardputerImage(content: Uint8Array, candidates = registeredTargets): FirmwareArtifactDescriptor | null {
@@ -222,7 +275,11 @@ export function inspectFirmwareArtifact(
   const registered = expected ? getFirmwareAdapterTarget(expected.hardwareProfileId, expected.adapterVersion, expected.target) : null;
   const candidates = expected ? registered ? [registered] : [] : registeredTargets;
   const looksLikeHex = content[0] === 0x3a || fileName.toLowerCase().endsWith(".hex");
-  const recognized = looksLikeHex ? inspectDotCompleteImage(content, candidates) : inspectCardputerImage(content, candidates) ?? inspectDotApplication(content, candidates);
+  const recognized = looksLikeHex
+    ? inspectDotCompleteImage(content, candidates)
+    : (!expected ? inspectGenericCardputerCompleteImage(content, candidates) : null)
+      ?? inspectCardputerImage(content, candidates)
+      ?? inspectDotApplication(content, candidates);
   return recognized ?? {
     hardwareProfileId: null,
     artifactRole: "unclassified",

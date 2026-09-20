@@ -5,6 +5,35 @@ import test from "node:test";
 import { getFirmwareAdapterTarget } from "../server/firmware-adapter-registry.js";
 import { firmwareContainsPayload, inspectFirmwareArtifact, prepareFirmwareUpload } from "../server/firmware-artifact.js";
 
+function esp32s3Image(payload: Uint8Array): Uint8Array {
+  const header = new Uint8Array(24);
+  header.set([0xe9, 1, 2, 0]);
+  new DataView(header.buffer).setUint32(4, 0x40370000, true);
+  new DataView(header.buffer).setUint16(12, 9, true);
+  const segment = new Uint8Array(8);
+  new DataView(segment.buffer).setUint32(0, 0x3c000020, true);
+  new DataView(segment.buffer).setUint32(4, payload.byteLength, true);
+  const body = Uint8Array.from([...header, ...segment, ...payload]);
+  const image = new Uint8Array((body.byteLength + 16) & ~15);
+  image.set(body);
+  image[image.byteLength - 1] = payload.reduce((value, byte) => value ^ byte, 0xef);
+  return image;
+}
+
+function externalCardputerCompleteImage(): Uint8Array {
+  const application = esp32s3Image(new Uint8Array(128));
+  const complete = new Uint8Array(0x10000 + application.byteLength).fill(0xff);
+  complete.set(esp32s3Image(new Uint8Array([1, 2, 3, 4])), 0);
+  complete.set([0xaa, 0x50, 0x01, 0x02], 0x8000);
+  new DataView(complete.buffer).setUint32(0x8004, 0x9000, true);
+  new DataView(complete.buffer).setUint32(0x8008, 0x5000, true);
+  complete.set([0xaa, 0x50, 0x00, 0x00], 0x8020);
+  new DataView(complete.buffer).setUint32(0x8024, 0x10000, true);
+  new DataView(complete.buffer).setUint32(0x8028, 0x200000, true);
+  complete.set(application, 0x10000);
+  return complete;
+}
+
 const cases = [
   ["dot_v1_compact_initial_swd.hex", "complete-image", 64 * 1024, ["swd"]],
   ["dot_v1_initial_swd.hex", "complete-image", 128 * 1024, ["swd"]],
@@ -30,6 +59,25 @@ test("keeps an unsupported artifact as a non-flashable draft", () => {
   assert.equal(descriptor.artifactRole, "unclassified");
   assert.deepEqual(descriptor.flashMethods, []);
   assert.equal(descriptor.status, "draft");
+});
+
+test("classifies a structurally valid external Cardputer ADV image without a firmware-specific marker", () => {
+  const content = externalCardputerCompleteImage();
+  const descriptor = inspectFirmwareArtifact(content, "external-cardputer-firmware.bin");
+
+  assert.equal(descriptor.hardwareProfileId, "stmweb.cardputer-adv");
+  assert.equal(descriptor.artifactRole, "complete-image");
+  assert.deepEqual(descriptor.flashMethods, ["usb"]);
+  assert.equal(descriptor.applicationBase, 0x10000);
+  assert.equal(descriptor.applicationLimit, 0x210000);
+  assert.equal(descriptor.runtimeVersion, null);
+  assert.equal(descriptor.status, "verified");
+});
+
+test("rejects an external Cardputer ADV image whose application exceeds its partition", () => {
+  const content = externalCardputerCompleteImage();
+  new DataView(content.buffer).setUint32(0x8028, 0x40, true);
+  assert.equal(inspectFirmwareArtifact(content, "overflowing-application.bin").artifactRole, "unclassified");
 });
 
 test("computes the stored digest from server-received bytes", () => {
@@ -61,21 +109,7 @@ test("finds an embedded configuration payload in application and complete images
 
 test("classifies Cardputer ADV application and complete ESP32-S3 images from verified bytes", () => {
   const marker = new TextEncoder().encode("STMWEB_ADAPTER:stmweb.cardputer-adv");
-  const espImage = (payload: Uint8Array) => {
-    const header = new Uint8Array(24);
-    header.set([0xe9, 1, 2, 0]);
-    new DataView(header.buffer).setUint32(4, 0x40370000, true);
-    new DataView(header.buffer).setUint16(12, 9, true);
-    const segment = new Uint8Array(8);
-    new DataView(segment.buffer).setUint32(0, 0x3c000020, true);
-    new DataView(segment.buffer).setUint32(4, payload.byteLength, true);
-    const body = Uint8Array.from([...header, ...segment, ...payload]);
-    const image = new Uint8Array((body.byteLength + 16) & ~15);
-    image.set(body);
-    image[image.byteLength - 1] = payload.reduce((value, byte) => value ^ byte, 0xef);
-    return image;
-  };
-  const application = espImage(Uint8Array.from([...marker, ...new Uint8Array(96)]));
+  const application = esp32s3Image(Uint8Array.from([...marker, ...new Uint8Array(96)]));
   const expected = { hardwareProfileId: "stmweb.cardputer-adv", adapterVersion: "1", target: "esp32s3fn8" };
   const applicationDescriptor = inspectFirmwareArtifact(application, "cardputer_adv_ota.bin", expected);
   assert.equal(applicationDescriptor.hardwareProfileId, "stmweb.cardputer-adv");
@@ -84,7 +118,7 @@ test("classifies Cardputer ADV application and complete ESP32-S3 images from ver
   assert.equal(applicationDescriptor.applicationBase, 0x40000);
 
   const complete = new Uint8Array(0x40000 + application.byteLength).fill(0xff);
-  complete.set(espImage(new Uint8Array([1, 2, 3, 4])), 0);
+  complete.set(esp32s3Image(new Uint8Array([1, 2, 3, 4])), 0);
   complete.set([0xaa, 0x50, 0x01, 0x00], 0x8000);
   new DataView(complete.buffer).setUint32(0x8004, 0xe000, true);
   new DataView(complete.buffer).setUint32(0x8008, 0x2000, true);

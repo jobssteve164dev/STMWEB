@@ -69,6 +69,20 @@ function validCompleteImage(): Uint8Array {
   return complete;
 }
 
+function validExternalCompleteImage(): Uint8Array {
+  const application = esp32s3Image(new Uint8Array(128));
+  const complete = new Uint8Array(0x10000 + application.byteLength).fill(0xff);
+  complete.set(esp32s3Image(new Uint8Array([1, 2, 3, 4])), 0);
+  complete.set([0xaa, 0x50, 0x01, 0x02], 0x8000);
+  new DataView(complete.buffer).setUint32(0x8004, 0x9000, true);
+  new DataView(complete.buffer).setUint32(0x8008, 0x5000, true);
+  complete.set([0xaa, 0x50, 0x00, 0x00], 0x8020);
+  new DataView(complete.buffer).setUint32(0x8024, 0x10000, true);
+  new DataView(complete.buffer).setUint32(0x8028, 0x200000, true);
+  complete.set(application, 0x10000);
+  return complete;
+}
+
 test("rejects USB application images because selecting the active OTA slot requires device state", async () => {
   const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   let requests = 0;
@@ -99,4 +113,35 @@ test("rejects a digest-matched complete image with an invalid ESP32-S3 layout", 
 test("accepts a verified Cardputer ADV complete image before device access", async () => {
   const bytes = validCompleteImage();
   await validateUsbFirmware(cardputerComplete(bytes), bytes);
+});
+
+test("accepts a structurally verified external Cardputer ADV image without a firmware-specific marker", async () => {
+  const bytes = validExternalCompleteImage();
+  await validateUsbFirmware(cardputerComplete(bytes, {
+    fileName: "external-cardputer-firmware.bin",
+    applicationBase: 0x10000,
+    applicationLimit: 0x210000,
+    runtimeVersion: null,
+  }), bytes);
+});
+
+test("rejects an external image whose recorded application partition does not match its bytes", async () => {
+  const bytes = validExternalCompleteImage();
+  await assert.rejects(validateUsbFirmware(cardputerComplete(bytes, {
+    fileName: "external-cardputer-firmware.bin",
+    applicationBase: 0x10000,
+    applicationLimit: 0x200000,
+    runtimeVersion: null,
+  }), bytes), /不是可验证的 Cardputer ADV 完整镜像/);
+});
+
+test("rejects an external image whose application exceeds its recorded partition", async () => {
+  const bytes = validExternalCompleteImage();
+  new DataView(bytes.buffer).setUint32(0x8028, 0x40, true);
+  await assert.rejects(validateUsbFirmware(cardputerComplete(bytes, {
+    fileName: "overflowing-application.bin",
+    applicationBase: 0x10000,
+    applicationLimit: 0x10040,
+    runtimeVersion: null,
+  }), bytes), /不是可验证的 Cardputer ADV 完整镜像/);
 });

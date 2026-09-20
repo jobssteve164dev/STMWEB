@@ -19,8 +19,6 @@ export function usbFlashAddress(firmware: FirmwareVersionRecord): number {
   throw new Error("USB 烧录目前只接受可验证的完整镜像；应用更新请使用蓝牙");
 }
 
-const cardputerMarker = new TextEncoder().encode("STMWEB_ADAPTER:stmweb.cardputer-adv");
-
 function readU16(bytes: Uint8Array, offset: number): number {
   return offset >= 0 && offset + 2 <= bytes.byteLength ? bytes[offset] | bytes[offset + 1] << 8 : 0;
 }
@@ -50,27 +48,25 @@ function inspectEsp32s3Image(bytes: Uint8Array, offset: number): number | null {
   return checksumOffset + 1;
 }
 
-function contains(source: Uint8Array, expected: Uint8Array): boolean {
-  outer: for (let start = 0; start <= source.byteLength - expected.byteLength; start += 1) {
-    for (let index = 0; index < expected.byteLength; index += 1) if (source[start + index] !== expected[index]) continue outer;
-    return true;
-  }
-  return false;
-}
-
 function partitionTableMatches(bytes: Uint8Array, firmware: FirmwareVersionRecord): boolean {
   if (firmware.applicationBase === null || firmware.applicationLimit === null || firmware.flashSize === null) return false;
-  let otaData = false; let ota0 = false; let ota1 = false;
+  const partitions: Array<{ offset: number; size: number }> = [];
+  let application = false;
+  let tableComplete = false;
   for (let offset = 0x8000; offset + 32 <= Math.min(bytes.byteLength, 0x9000); offset += 32) {
-    if (bytes[offset] !== 0xaa || bytes[offset + 1] !== 0x50) continue;
-    const type = bytes[offset + 2]; const subtype = bytes[offset + 3];
+    if (bytes[offset] === 0xff && bytes[offset + 1] === 0xff) { tableComplete = true; break; }
+    if (bytes[offset] === 0xeb && bytes[offset + 1] === 0xeb) { tableComplete = true; break; }
+    if (bytes[offset] !== 0xaa || bytes[offset + 1] !== 0x50) return false;
+    const type = bytes[offset + 2];
     const partitionOffset = readU32(bytes, offset + 4); const partitionSize = readU32(bytes, offset + 8);
-    if (partitionOffset + partitionSize > firmware.flashSize) return false;
-    if (type === 1 && subtype === 0 && partitionOffset === 0xe000 && partitionSize === 0x2000) otaData = true;
-    if (type === 0 && subtype === 0x10 && partitionOffset === firmware.applicationBase && partitionSize === firmware.applicationLimit - firmware.applicationBase) ota0 = true;
-    if (type === 0 && subtype === 0x11 && partitionOffset === firmware.applicationLimit && partitionSize === firmware.applicationLimit - firmware.applicationBase) ota1 = true;
+    if (!partitionSize || partitionOffset < 0x9000 || partitionOffset + partitionSize > firmware.flashSize
+      || partitions.some((partition) => partitionOffset < partition.offset + partition.size
+        && partition.offset < partitionOffset + partitionSize)) return false;
+    partitions.push({ offset: partitionOffset, size: partitionSize });
+    if (type === 0 && partitionOffset === firmware.applicationBase
+      && partitionSize === firmware.applicationLimit - firmware.applicationBase) application = true;
   }
-  return otaData && ota0 && ota1;
+  return tableComplete && application;
 }
 
 export async function validateUsbFirmware(firmware: FirmwareVersionRecord, bytes: Uint8Array): Promise<void> {
@@ -81,8 +77,9 @@ export async function validateUsbFirmware(firmware: FirmwareVersionRecord, bytes
   if (sha256 !== firmware.sha256.toLowerCase()) throw new Error("固件 SHA-256 与已验证记录不一致");
   const bootEnd = inspectEsp32s3Image(bytes, 0);
   const applicationEnd = firmware.applicationBase === null ? null : inspectEsp32s3Image(bytes, firmware.applicationBase);
-  if (!bootEnd || !applicationEnd || !partitionTableMatches(bytes, firmware)
-    || !contains(bytes.subarray(firmware.applicationBase!, applicationEnd), cardputerMarker)) {
+  if (!bootEnd || bootEnd > 0x8000 || !applicationEnd
+    || firmware.applicationLimit === null || applicationEnd > firmware.applicationLimit
+    || !partitionTableMatches(bytes, firmware)) {
     throw new Error("不是可验证的 Cardputer ADV 完整镜像");
   }
 }

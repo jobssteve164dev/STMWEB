@@ -127,6 +127,14 @@ test("offers only complete images in USB flashing until OTA slot selection is su
   assert.doesNotMatch(html, /cardputer-app\.bin/);
 });
 
+test("offers a local-only USB firmware path without requiring a workspace upload", () => {
+  const html = renderToStaticMarkup(React.createElement(UsbFirmwareFlashPanel, { firmwareVersions: [], onEvent: () => undefined }));
+  assert.match(html, /选择本机完整固件/);
+  assert.match(html, /只在浏览器中校验，不会上传/);
+  assert.match(html, /刷写波特率/);
+  assert.match(html, /value="460800"/);
+});
+
 test("renders the phase C firmware composer using user actions", async () => {
   const html = renderToStaticMarkup(React.createElement(BuildRunnerPanel, { proAccess: true }));
   assert.match(html, /标准固件生成/);

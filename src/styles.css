@@ -3353,6 +3353,11 @@ td small {
 .firmware-flash-source > label > span { color: var(--text-muted); font-size: 12px; }
 .firmware-flash-source > span { color: var(--text-muted); padding-bottom: 12px; }
 .firmware-flash-source select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; min-width: 0; padding: 0 10px; width: 100%; }
+.usb-flash-baud { display: grid; gap: 7px; margin-top: 12px; max-width: 260px; }
+.usb-flash-baud > span { color: var(--text-muted); font-size: 12px; }
+.usb-flash-baud input { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; padding: 0 10px; width: 100%; }
+.usb-flash-baud input[aria-invalid="true"] { border-color: #cd4949; }
+.usb-flash-baud small { color: var(--text-muted); }
 .flash-preflight { display: flex; gap: 8px; margin: 14px 0; }
 .flash-preflight span { align-items: center; border-radius: 999px; display: flex; font-size: 12px; font-weight: 700; gap: 5px; padding: 6px 10px; }
 .flash-preflight .ready { background: rgba(43, 166, 121, 0.14); color: #55d4a4; }

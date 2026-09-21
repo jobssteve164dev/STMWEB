@@ -122,6 +122,49 @@ test("accepts a verified Cardputer ADV complete image before device access", asy
   await validateUsbFirmware(cardputerComplete(bytes), bytes);
 });
 
+test("prepares and rejects an invalid USB image before requesting a device", async () => {
+  const module = await import("../src/esp-usb-flasher.js") as unknown as {
+    prepareUsbFlash?: (firmware: FirmwareVersionRecord, bytes: Uint8Array, baudRate: number) => Promise<number>;
+  };
+  assert.equal(typeof module.prepareUsbFlash, "function", "USB flash preparation is missing");
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let requests = 0;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { serial: { requestPort: () => { requests += 1; return Promise.resolve({}); } } },
+  });
+  const bytes = new Uint8Array(0x40100).fill(0xff);
+  try {
+    await assert.rejects(async () => {
+      const baudRate = await module.prepareUsbFlash!(cardputerComplete(bytes), bytes, 460800);
+      await flashFirmwareOverUsb(cardputerComplete(bytes), bytes, () => undefined, baudRate);
+    }, /完整镜像/);
+    assert.equal(requests, 0);
+  } finally {
+    if (previousNavigator) Object.defineProperty(globalThis, "navigator", previousNavigator);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  }
+});
+
+test("requests the USB port synchronously after image preparation", async () => {
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let requests = 0;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { serial: { requestPort: () => { requests += 1; return Promise.reject(new DOMException("cancelled", "NotFoundError")); } } },
+  });
+  const bytes = validCompleteImage();
+  try {
+    const flashing = flashFirmwareOverUsb(cardputerComplete(bytes), bytes, () => undefined);
+    const rejected = assert.rejects(flashing, /cancelled/);
+    assert.equal(requests, 1, "the browser picker must open in the confirming click's user activation");
+    await rejected;
+  } finally {
+    if (previousNavigator) Object.defineProperty(globalThis, "navigator", previousNavigator);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  }
+});
+
 test("accepts a structurally verified external Cardputer ADV image without a firmware-specific marker", async () => {
   const bytes = validExternalCompleteImage();
   await validateUsbFirmware(cardputerComplete(bytes, {

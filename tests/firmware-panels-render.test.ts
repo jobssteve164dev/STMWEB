@@ -132,7 +132,32 @@ test("offers a local-only USB firmware path without requiring a workspace upload
   assert.match(html, /选择本机完整固件/);
   assert.match(html, /只在浏览器中校验，不会上传/);
   assert.match(html, /刷写波特率/);
+  assert.match(html, /<option value="115200">115200<\/option>/);
+  assert.match(html, /<option value="230400">230400<\/option>/);
+  assert.match(html, /<option value="460800" selected="">460800<\/option>/);
+  assert.match(html, /<option value="921600">921600<\/option>/);
+  assert.match(html, /<option value="custom">自定义<\/option>/);
+  assert.doesNotMatch(html, /<datalist/);
   assert.match(html, /value="460800"/);
+});
+
+test("renders the project confirmation dialog as an accessible in-product action", async () => {
+  const module = await import("../src/ConfirmationDialog.js").catch(() => null);
+  assert.ok(module, "the shared confirmation dialog is missing");
+  const html = renderToStaticMarkup(React.createElement(module.ConfirmationDialog, {
+    open: true,
+    title: "确认烧录",
+    message: "设备将重新启动。",
+    confirmLabel: "继续烧录",
+    cancelLabel: "取消",
+    onConfirm: () => undefined,
+    onCancel: () => undefined,
+  }));
+  assert.match(html, /role="alertdialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /确认烧录/);
+  assert.match(html, /继续烧录/);
+  assert.match(html, /取消/);
 });
 
 test("renders the phase C firmware composer using user actions", async () => {

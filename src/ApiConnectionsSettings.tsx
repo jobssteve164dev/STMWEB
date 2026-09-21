@@ -1,5 +1,6 @@
 import { ArrowRight, Check, Clipboard, KeyRound, Loader2, LockKeyhole, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useLocale } from "./i18n.js";
 
 type ApiScope = "devices:read" | "devices:control" | "debug:read" | "debug:execute" |
@@ -61,6 +62,7 @@ export function ApiConnectionsSettings({ accountEmail, proAccess, workspaceId }:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ connectionId: string; kind: "rotate" | "revoke" } | null>(null);
 
   const load = useCallback(async () => {
     const result = await request<{ connections: ApiConnection[]; recentActivity: ApiActivity[] }>(`/?workspaceId=${encodeURIComponent(workspaceId)}`);
@@ -82,6 +84,13 @@ export function ApiConnectionsSettings({ accountEmail, proAccess, workspaceId }:
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : c("操作没有完成", "The action did not complete"));
     } finally { setBusy(false); }
+  }
+
+  function confirmPendingAction() {
+    const action = pendingAction;
+    if (!action) return;
+    setPendingAction(null);
+    void perform(() => request(`/${action.connectionId}/${action.kind}`, { method: "POST", body: "{}" }));
   }
 
   return (
@@ -111,10 +120,11 @@ export function ApiConnectionsSettings({ accountEmail, proAccess, workspaceId }:
       <div className="api-connection-list">{connections.length ? connections.map((connection) => <article key={connection.id} className={connection.status === "revoked" ? "revoked" : ""}>
         <header><div><span className={connection.status === "active" ? "state-pill online" : "state-pill"}><span />{connection.status === "active" ? c("可用", "Active") : c("已撤销", "Revoked")}</span><h3>{connection.name}</h3><p>{connection.purpose}</p></div><small>{c("凭证尾号", "Credential ending")} · {connection.credentialHint}</small></header>
         <ul>{connection.scopes.map((scope) => { const item = scopeGroups.find((candidate) => candidate.id === scope); return <li key={scope}>{item ? (isEnglish ? item.en : item.zh) : scope}</li>; })}</ul>
-        <footer><span>{connection.lastUsedAt ? c(`最近使用 ${new Date(connection.lastUsedAt).toLocaleString(locale)}`, `Last used ${new Date(connection.lastUsedAt).toLocaleString(locale)}`) : c(`创建于 ${new Date(connection.createdAt).toLocaleString(locale)}`, `Created ${new Date(connection.createdAt).toLocaleString(locale)}`)}</span>{connection.status === "active" ? <div><button className="secondary-button" type="button" disabled={busy} onClick={() => { if (window.confirm(c("轮换后旧凭证会立即失效。确定继续吗？", "The old credential will stop working immediately. Continue?"))) void perform(() => request(`/${connection.id}/rotate`, { method: "POST", body: "{}" })); }}><RefreshCw size={15} />{c("轮换", "Rotate")}</button><button className="danger-button" type="button" disabled={busy} onClick={() => { if (window.confirm(c("撤销后这个工具会立即失去访问权限，已有设备、记录和构建不会被删除。", "This tool will immediately lose access. Existing devices, records and builds will not be deleted."))) void perform(() => request(`/${connection.id}/revoke`, { method: "POST", body: "{}" })); }}><Trash2 size={15} />{c("撤销", "Revoke")}</button></div> : null}</footer>
+        <footer><span>{connection.lastUsedAt ? c(`最近使用 ${new Date(connection.lastUsedAt).toLocaleString(locale)}`, `Last used ${new Date(connection.lastUsedAt).toLocaleString(locale)}`) : c(`创建于 ${new Date(connection.createdAt).toLocaleString(locale)}`, `Created ${new Date(connection.createdAt).toLocaleString(locale)}`)}</span>{connection.status === "active" ? <div><button className="secondary-button" type="button" disabled={busy} onClick={() => setPendingAction({ connectionId: connection.id, kind: "rotate" })}><RefreshCw size={15} />{c("轮换", "Rotate")}</button><button className="danger-button" type="button" disabled={busy} onClick={() => setPendingAction({ connectionId: connection.id, kind: "revoke" })}><Trash2 size={15} />{c("撤销", "Revoke")}</button></div> : null}</footer>
       </article>) : <div className="empty-state"><span className="empty-icon"><KeyRound size={25} /></span><strong>{c("还没有 API 连接", "No API connections yet")}</strong><p>{c("创建后，你可以把凭证交给自己信任的调用工具。", "Create one, then give the credential to a tool you trust.")}</p></div>}</div>
       <section className="api-activity"><h2>{c("最近调用", "Recent Activity")}</h2>{activity.length ? <ol>{activity.map((item) => <li key={item.id}><span className={item.outcome}>{item.outcome === "succeeded" ? c("成功", "Succeeded") : c("失败", "Failed")}</span><strong>{connections.find((connection) => connection.id === item.connectionId)?.name ?? c("已撤销连接", "Revoked connection")}</strong><small>{item.action} · {new Date(item.occurredAt).toLocaleString(locale)}</small></li>)}</ol> : <p>{c("调用工具使用连接后，这里会出现操作记录。", "Activity appears here after a tool uses a connection.")}</p>}</section>
       <p className="api-account-note"><ShieldCheck size={16} />{c(`这些连接属于 ${accountEmail}，不能切换到其他账户，也不会获得你的登录密码。`, `These connections belong to ${accountEmail}. They cannot switch accounts or access your sign-in password.`)}</p>
+      <ConfirmationDialog open={Boolean(pendingAction)} title={pendingAction?.kind === "revoke" ? c("撤销 API 连接？", "Revoke API connection?") : c("轮换 API 凭证？", "Rotate API credential?")} message={pendingAction?.kind === "revoke" ? c("这个工具会立即失去访问权限；已有设备、记录和构建不会被删除。", "This tool will immediately lose access. Existing devices, records and builds will not be deleted.") : c("旧凭证会立即失效。请在轮换后保存新凭证并更新调用工具。", "The old credential will stop working immediately. Save the new credential and update the calling tool after rotating.")} confirmLabel={pendingAction?.kind === "revoke" ? c("确认撤销", "Revoke connection") : c("确认轮换", "Rotate credential")} cancelLabel={c("取消", "Cancel")} tone={pendingAction?.kind === "revoke" ? "danger" : "default"} onConfirm={confirmPendingAction} onCancel={() => setPendingAction(null)} />
       </> : null}
     </section>
   );

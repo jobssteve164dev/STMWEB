@@ -5,6 +5,7 @@ import { flashCardputerAdvApplication, validateCardputerAdvApplication } from ".
 import { flashDotApplication, validateDotApplication, type DotApplicationFirmware, type DotFlashProgress } from "./dot-firmware-flasher.js";
 import { loadBuiltInDotArtifacts } from "./firmware-manifest.js";
 import type { HardwareConnection } from "./hardware.js";
+import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useLocale } from "./i18n.js";
 
 interface DotFirmwareFlashPanelProps {
@@ -36,6 +37,7 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
   const [localFirmware, setLocalFirmware] = useState<SelectedFirmware | null>(null);
   const [progress, setProgress] = useState<DotFlashProgress | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingFirmware, setPendingFirmware] = useState<SelectedFirmware | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "warning" | "error"; text: string } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const bluetoothReady = connection?.kind === "bluetooth" && Boolean(connection.write && connection.setDataHandler);
@@ -77,16 +79,24 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
     return { name: saved.fileName, bytes, hardwareProfileId: saved.hardwareProfileId ?? "" };
   }
 
-  async function flash() {
+  async function prepareFlash() {
     if (!bluetoothReady) { setMessage({ tone: "error", text: c("请先通过蓝牙连接要升级的设备", "Connect the device to update over Bluetooth first") }); return; }
     setBusy(true); setMessage(null); setProgress(null);
     try {
       const firmware = await selectedFirmware();
       if (firmware.hardwareProfileId === "stmweb.dot-v1" && voltage < 3.3) throw new Error(c("电池电压未达到 3.30 V，暂不能开始烧录", "Battery voltage must reach 3.30 V before flashing"));
-      const confirmed = firmware.hardwareProfileId === "stmweb.cardputer-adv"
-        ? window.confirm(c("先短按 Cardputer ADV 顶部的 G0 键授权本次升级，再点“确定”。升级期间请保持设备供电并靠近电脑。", "Briefly press G0 on top of the Cardputer ADV to authorize this update, then choose OK. Keep the device powered and nearby."))
-        : window.confirm(c("烧录期间设备会停止运行并重启。请保持供电和蓝牙连接，确定继续吗？", "The device will stop and restart during flashing. Keep power and Bluetooth connected. Continue?"));
-      if (!confirmed) return;
+      setPendingFirmware(firmware);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : c("固件准备失败", "Firmware could not be prepared");
+      setMessage({ tone: "error", text });
+    } finally { setBusy(false); }
+  }
+
+  async function flash() {
+    const firmware = pendingFirmware;
+    if (!firmware) return;
+    setPendingFirmware(null); setBusy(true); setMessage(null); setProgress(null);
+    try {
       const fileSize = firmware.bytes instanceof Uint8Array ? firmware.bytes.byteLength : firmware.bytes.reduce((total, item) => total + item.byteLength, 0);
       onEvent("info", c(`开始蓝牙烧录 · ${firmware.name}`, `Bluetooth flashing started · ${firmware.name}`), { fileName: firmware.name, fileSize });
       if (firmware.hardwareProfileId === "stmweb.cardputer-adv") {
@@ -127,7 +137,8 @@ export function DotFirmwareFlashPanel({ connection, voltage, firmwareVersions, o
       <div className="flash-preflight"><span className={bluetoothReady ? "ready" : "blocked"}>{bluetoothReady ? <Check size={14} /> : <CircleAlert size={14} />}{c("蓝牙连接", "Bluetooth")}</span>{selectedProfileId === "stmweb.dot-v1" ? <span className={voltageReady ? "ready" : "blocked"}>{voltageReady ? <Check size={14} /> : <CircleAlert size={14} />}{voltage > 0 ? `${voltage.toFixed(2)} V` : c("等待电压", "Waiting for voltage")}</span> : <span className={savedBins.length || localFirmware ? "ready" : "blocked"}>{savedBins.length || localFirmware ? <Check size={14} /> : <CircleAlert size={14} />}{c("兼容固件", "Compatible firmware")}</span>}</div>
       {progress ? <div className="flash-progress" aria-live="polite"><div><span>{c(...stageLabels[progress.stage])}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
       {message ? <div className={`flash-result ${message.tone}`} role={message.tone === "error" ? "alert" : "status"}>{message.tone === "success" ? <Check size={17} /> : <CircleAlert size={17} />}<span>{message.text}</span></div> : null}
-      <button className="primary-button" type="button" disabled={busy || !bluetoothReady || !voltageReady} onClick={() => void flash()}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在烧录", "Flashing") : c("开始蓝牙烧录", "Flash over Bluetooth")}</button>
+      <button className="primary-button" type="button" disabled={busy || !bluetoothReady || !voltageReady} onClick={() => void prepareFlash()}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在准备", "Preparing") : c("开始蓝牙烧录", "Flash over Bluetooth")}</button>
+      <ConfirmationDialog open={Boolean(pendingFirmware)} title={pendingFirmware?.hardwareProfileId === "stmweb.cardputer-adv" ? c("准备升级 Cardputer ADV", "Ready to update Cardputer ADV") : c("准备通过蓝牙烧录", "Ready to flash over Bluetooth")} message={pendingFirmware?.hardwareProfileId === "stmweb.cardputer-adv" ? c("先短按设备顶部的 G0 键授权本次升级。升级期间请保持设备供电并靠近电脑。", "Briefly press G0 on top of the device to authorise this update. Keep it powered and nearby during the update.") : c("烧录期间设备会停止运行并重启。请保持供电和蓝牙连接。", "The device will stop and restart during flashing. Keep power and Bluetooth connected.")} confirmLabel={c("开始烧录", "Start flashing")} cancelLabel={c("取消", "Cancel")} onConfirm={() => void flash()} onCancel={() => setPendingFirmware(null)} />
     </article>
   );
 }

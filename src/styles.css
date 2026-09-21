@@ -2140,6 +2140,12 @@ td small {
   color: var(--text-soft);
 }
 
+.confirmation-dialog { width: min(480px, 100%); }
+.confirmation-dialog .dialog-heading > div { display: grid; gap: 7px; }
+.confirmation-dialog-icon { align-items: center; color: #8ba9f3; display: flex; }
+.confirmation-dialog-body { color: var(--text-soft); font-size: 13px; line-height: 1.65; padding: 22px 24px; }
+.confirmation-dialog-actions { justify-content: flex-end; }
+
 .connection-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3353,11 +3359,12 @@ td small {
 .firmware-flash-source > label > span { color: var(--text-muted); font-size: 12px; }
 .firmware-flash-source > span { color: var(--text-muted); padding-bottom: 12px; }
 .firmware-flash-source select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; min-width: 0; padding: 0 10px; width: 100%; }
-.usb-flash-baud { display: grid; gap: 7px; margin-top: 12px; max-width: 260px; }
-.usb-flash-baud > span { color: var(--text-muted); font-size: 12px; }
-.usb-flash-baud input { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; padding: 0 10px; width: 100%; }
+.usb-flash-baud { display: grid; gap: 7px; grid-template-columns: repeat(2, minmax(0, 220px)); margin-top: 12px; }
+.usb-flash-baud label { display: grid; gap: 7px; }
+.usb-flash-baud label > span { color: var(--text-muted); font-size: 12px; }
+.usb-flash-baud input, .usb-flash-baud select { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; color: var(--text); min-height: 44px; padding: 0 10px; width: 100%; }
 .usb-flash-baud input[aria-invalid="true"] { border-color: #cd4949; }
-.usb-flash-baud small { color: var(--text-muted); }
+.usb-flash-baud small { color: var(--text-muted); grid-column: 1 / -1; }
 .flash-preflight { display: flex; gap: 8px; margin: 14px 0; }
 .flash-preflight span { align-items: center; border-radius: 999px; display: flex; font-size: 12px; font-weight: 700; gap: 5px; padding: 6px 10px; }
 .flash-preflight .ready { background: rgba(43, 166, 121, 0.14); color: #55d4a4; }
@@ -3430,4 +3437,5 @@ td small {
   .firmware-flash-source { align-items: stretch; grid-template-columns: 1fr; }
   .firmware-flash-source > span { padding: 0; text-align: center; }
   .firmware-flash-source .secondary-button { justify-content: center; width: 100%; }
+  .usb-flash-baud { grid-template-columns: 1fr; }
 }

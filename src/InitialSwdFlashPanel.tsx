@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { flashDotInitialFirmware, parseDotInitialHex, requestCmsisDapProbe, type CmsisDapPacketTransport, type CmsisDapProbeKind, type SwdFlashProgress, type SwdFlashResult } from "./cmsis-dap-swd.js";
 import { loadFirmwareContent, type FirmwareVersionRecord } from "./db.js";
 import { loadBuiltInDotArtifacts } from "./firmware-manifest.js";
+import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useLocale } from "./i18n.js";
 
 const builtInFirmwareId = "built-in-dot-stable";
@@ -19,6 +20,7 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
   const [result, setResult] = useState<SwdFlashResult | null>(null);
   const [error, setError] = useState("");
   const [savedId, setSavedId] = useState(builtInFirmwareId);
+  const [pendingProbeKind, setPendingProbeKind] = useState<CmsisDapProbeKind | null>(null);
   const [resetStep, setResetStep] = useState<"hold" | "release" | "release-after-failure" | null>(null);
   const resetAction = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null);
   const savedSwdImages = useMemo(() => firmwareVersions.filter((item) => item.artifactRole === "complete-image" && item.flashMethods.includes("swd")
@@ -62,13 +64,6 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
     try {
       setProgress({ stage: "connecting", percent: 1, detail: c("请选择与小车连接的调试探针", "Choose the debug probe connected to the vehicle") });
       selectedTransport = await requestCmsisDapProbe(probeKind);
-      const selectedName = savedId === builtInFirmwareId ? c("DOT 完整稳定版（含 Bootloader）", "DOT complete stable firmware (includes Bootloader)") : savedSwdImages.find((item) => item.id === savedId)?.fileName ?? c("所选固件", "the selected firmware");
-      if (!window.confirm(c(`即将通过 SWD 写入 ${selectedName}。请确认 CMSIS-DAP 探针已连接 SWDIO、SWCLK、GND，并保持设备稳定供电。`, `The selected firmware will be written over SWD. Confirm the CMSIS-DAP probe is connected to SWDIO, SWCLK and GND, and keep the device powered.`))) {
-        await selectedTransport.close();
-        selectedTransport = undefined;
-        setProgress(null);
-        return;
-      }
       const firmwares = await selectedFirmwares();
       setResult(await flashDotInitialFirmware(firmwares, setProgress, {
         holdReset: async () => {
@@ -124,9 +119,10 @@ export function SwdFlashPanel({ firmwareVersions }: SwdFlashPanelProps) {
         {result ? <div className="flash-result success"><Check size={17} /><span>{c(`SWD 烧录完成 · ${result.probeName} · ${result.flashSize / 1024} KiB`, `SWD flashing complete · ${result.probeName} · ${result.flashSize / 1024} KiB`)}</span></div> : null}
         {error ? <div className="flash-result error" role="alert"><CircleAlert size={17} /><span>{error}</span></div> : null}
       <div className="initial-flash-actions">
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void flash("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并烧录", "Connect DAPLink & Flash")}</button>
-        <button className="secondary-button" type="button" disabled={busy} onClick={() => void flash("slogic-combo8")}>{c("使用 SLogic Combo8", "Use SLogic Combo8")}</button>
+        <button className="primary-button" type="button" disabled={busy} onClick={() => setPendingProbeKind("hid")}>{busy ? <Loader2 className="spinning" size={17} /> : <Cpu size={17} />}{busy ? c("正在连接", "Connecting") : c("连接 DAPLink 并烧录", "Connect DAPLink & Flash")}</button>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => setPendingProbeKind("slogic-combo8")}>{c("使用 SLogic Combo8", "Use SLogic Combo8")}</button>
       </div>
+      <ConfirmationDialog open={Boolean(pendingProbeKind)} title={c("准备通过 SWD 烧录", "Ready to flash over SWD")} message={c(`即将写入${savedId === builtInFirmwareId ? " DOT 完整稳定版（含 Bootloader）" : ` ${savedSwdImages.find((item) => item.id === savedId)?.fileName ?? "所选固件"}`}。请确认探针已连接 SWDIO、SWCLK、GND，并保持设备稳定供电。`, `The selected firmware will be written over SWD. Confirm the probe is connected to SWDIO, SWCLK and GND, and keep the device powered.`)} confirmLabel={c("继续并选择探针", "Continue & choose probe")} cancelLabel={c("取消", "Cancel")} onConfirm={() => { const probeKind = pendingProbeKind; setPendingProbeKind(null); if (probeKind) void flash(probeKind); }} onCancel={() => setPendingProbeKind(null)} />
     </article>
   );
 }

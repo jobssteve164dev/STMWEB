@@ -147,6 +147,12 @@ export async function validateUsbFirmware(firmware: FirmwareVersionRecord, bytes
   }
 }
 
+export async function prepareUsbFlash(firmware: FirmwareVersionRecord, bytes: Uint8Array, baudRate: number): Promise<number> {
+  const verifiedBaudRate = usbFlashBaudRate(baudRate);
+  await validateUsbFirmware(firmware, bytes);
+  return verifiedBaudRate;
+}
+
 export async function flashFirmwareOverUsb(
   firmware: FirmwareVersionRecord,
   bytes: Uint8Array,
@@ -155,12 +161,11 @@ export async function flashFirmwareOverUsb(
 ): Promise<{ chipName: string }> {
   const address = usbFlashAddress(firmware);
   const verifiedBaudRate = usbFlashBaudRate(baudRate);
-  await validateUsbFirmware(firmware, bytes);
   const serial = (navigator as SerialNavigator).serial;
   if (!serial) throw new Error("当前浏览器不支持 USB 串口烧录，请使用最新版 Chrome 或 Edge");
 
   onProgress({ stage: "connecting", percent: 1, detail: "请选择已进入下载模式的 USB 设备" });
-  const port = await serial.requestPort();
+  const [port] = await Promise.all([serial.requestPort(), validateUsbFirmware(firmware, bytes)]);
   const { ESPLoader, Transport } = await import("esptool-js");
   const transport = new Transport(port as ConstructorParameters<typeof Transport>[0], false);
   const terminal: IEspLoaderTerminal = { clean() {}, writeLine() {}, write() {} };

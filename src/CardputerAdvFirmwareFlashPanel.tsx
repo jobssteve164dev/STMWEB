@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { loadFirmwareContent, type DebugEventRecord, type FirmwareVersionRecord } from "./db.js";
 import type { HardwareConnection } from "./hardware.js";
 import { flashCardputerAdvApplication, validateCardputerAdvApplication, type CardputerAdvFlashProgress } from "./cardputer-adv-flasher.js";
+import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useLocale } from "./i18n.js";
 
 interface Props {
@@ -21,6 +22,7 @@ export function CardputerAdvFirmwareFlashPanel({ connection, firmwareVersions, o
   const [localFirmware, setLocalFirmware] = useState<{ name: string; bytes: Uint8Array } | null>(null);
   const [progress, setProgress] = useState<CardputerAdvFlashProgress | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "warning" | "error"; text: string } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const bluetoothReady = connection?.kind === "bluetooth" && Boolean(connection.write && connection.setDataHandler);
@@ -51,7 +53,7 @@ export function CardputerAdvFirmwareFlashPanel({ connection, firmwareVersions, o
 
   async function flash() {
     if (!bluetoothReady) { setMessage({ tone: "error", text: c("请先通过蓝牙连接 Cardputer ADV", "Connect the Cardputer ADV over Bluetooth first") }); return; }
-    if (!window.confirm(c("先短按 Cardputer ADV 顶部的 G0 键授权本次升级，再点“确定”。升级期间请保持设备供电并靠近电脑。", "Briefly press G0 on top of the Cardputer ADV to authorize this update, then choose OK. Keep the device powered and nearby."))) return;
+    setConfirmOpen(false);
     setBusy(true); setMessage(null); setProgress(null);
     try {
       const firmware = await selectedFirmware();
@@ -81,6 +83,7 @@ export function CardputerAdvFirmwareFlashPanel({ connection, firmwareVersions, o
     <div className="flash-preflight"><span className={bluetoothReady ? "ready" : "blocked"}>{bluetoothReady ? <Check size={14} /> : <CircleAlert size={14} />}{c("蓝牙连接", "Bluetooth")}</span><span className={applications.length || localFirmware ? "ready" : "blocked"}>{applications.length || localFirmware ? <Check size={14} /> : <CircleAlert size={14} />}{c("Cardputer ADV 应用固件", "Cardputer ADV application")}</span></div>
     {progress ? <div className="flash-progress" aria-live="polite"><div><span>{progress.stage === "checking" ? c("正在核对设备", "Checking device") : progress.stage === "writing" ? c("正在写入固件", "Writing firmware") : progress.stage === "verifying" ? c("正在校验固件", "Verifying firmware") : c("正在重启设备", "Restarting device")}</span><strong>{progress.percent}%</strong></div><progress max="100" value={progress.percent} /></div> : null}
     {message ? <div className={`flash-result ${message.tone}`} role={message.tone === "error" ? "alert" : "status"}>{message.tone === "success" ? <Check size={17} /> : <CircleAlert size={17} />}<span>{message.text}</span></div> : null}
-    <button className="primary-button" type="button" disabled={busy || !bluetoothReady || (!applications.length && !localFirmware)} onClick={() => void flash()}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在升级", "Updating") : c("开始蓝牙升级", "Update over Bluetooth")}</button>
+    <button className="primary-button" type="button" disabled={busy || !bluetoothReady || (!applications.length && !localFirmware)} onClick={() => setConfirmOpen(true)}>{busy ? <Loader2 className="spinning" size={17} /> : <FileCode2 size={17} />}{busy ? c("正在升级", "Updating") : c("开始蓝牙升级", "Update over Bluetooth")}</button>
+    <ConfirmationDialog open={confirmOpen} title={c("准备升级 Cardputer ADV", "Ready to update Cardputer ADV")} message={c("先短按设备顶部的 G0 键授权本次升级。升级期间请保持设备供电并靠近电脑。", "Briefly press G0 on top of the device to authorise this update. Keep it powered and near the computer during the update.")} confirmLabel={c("开始升级", "Start update")} cancelLabel={c("取消", "Cancel")} onConfirm={() => void flash()} onCancel={() => setConfirmOpen(false)} />
   </article>;
 }
